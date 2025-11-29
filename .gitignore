@@ -1,0 +1,38 @@
+# nnU-Net directories (too large for git)
+nnUNet_raw/
+nnUNet_preprocessed/
+nnUNet_results/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Dev Container (local environment configuration)
+.devcontainer/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+training.log
+
+# Temporary files
+*.tmp
+*.temp
+
