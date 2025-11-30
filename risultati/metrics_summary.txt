@@ -1,0 +1,109 @@
+================================================================================
+nnU-Net Test Results Summary
+================================================================================
+
+Dataset: 500 (Dataset500_Hybrid_BraTS)
+Configuration: 2d
+Fold: 0
+Test Cases: 9
+
+--------------------------------------------------------------------------------
+Per-Class Average Metrics:
+--------------------------------------------------------------------------------
+
+0 (ID: background):
+  Dice Score:     0.0000 ± 0.0000
+  IoU:            0.0000 ± 0.0000
+  Sensitivity:    0.0000 ± 0.0000
+  Specificity:    1.0000 ± 0.0000
+
+2 (ID: edema):
+  Dice Score:     0.0000 ± 0.0000
+  IoU:            0.0000 ± 0.0000
+  Sensitivity:    0.0000 ± 0.0000
+  Specificity:    1.0000 ± 0.0000
+
+3 (ID: enhancing):
+  Dice Score:     0.0000 ± 0.0000
+  IoU:            0.0000 ± 0.0000
+  Sensitivity:    0.0000 ± 0.0000
+  Specificity:    1.0000 ± 0.0000
+
+1 (ID: necrotic):
+  Dice Score:     0.0000 ± 0.0000
+  IoU:            0.0000 ± 0.0000
+  Sensitivity:    0.0000 ± 0.0000
+  Specificity:    1.0000 ± 0.0000
+
+--------------------------------------------------------------------------------
+Overall Metrics (All Classes Combined):
+--------------------------------------------------------------------------------
+Dice Score:     0.9969 ± 0.0021
+IoU:            0.9938 ± 0.0042
+
+================================================================================
+Per-Case Detailed Metrics:
+================================================================================
+
+BraTS_Real_040:
+  Overall Dice: 0.9953, IoU: 0.9907
+    0: Dice=0.0000, IoU=0.0000, Sens=0.0000
+    1: Dice=0.0000, IoU=0.0000, Sens=0.0000
+    2: Dice=0.0000, IoU=0.0000, Sens=0.0000
+    3: Dice=0.0000, IoU=0.0000, Sens=0.0000
+
+BraTS_Real_013:
+  Overall Dice: 0.9947, IoU: 0.9894
+    0: Dice=0.0000, IoU=0.0000, Sens=0.0000
+    1: Dice=0.0000, IoU=0.0000, Sens=0.0000
+    2: Dice=0.0000, IoU=0.0000, Sens=0.0000
+    3: Dice=0.0000, IoU=0.0000, Sens=0.0000
+
+BraTS_Synth_054:
+  Overall Dice: 0.9933, IoU: 0.9868
+    0: Dice=0.0000, IoU=0.0000, Sens=0.0000
+    1: Dice=0.0000, IoU=0.0000, Sens=0.0000
+    2: Dice=0.0000, IoU=0.0000, Sens=0.0000
+    3: Dice=0.0000, IoU=0.0000, Sens=0.0000
+
+BraTS_Synth_020:
+  Overall Dice: 0.9992, IoU: 0.9985
+    0: Dice=0.0000, IoU=0.0000, Sens=0.0000
+    1: Dice=0.0000, IoU=0.0000, Sens=0.0000
+    2: Dice=0.0000, IoU=0.0000, Sens=0.0000
+    3: Dice=0.0000, IoU=0.0000, Sens=0.0000
+
+BraTS_Synth_064:
+  Overall Dice: 0.9995, IoU: 0.9990
+    0: Dice=0.0000, IoU=0.0000, Sens=0.0000
+    1: Dice=0.0000, IoU=0.0000, Sens=0.0000
+    2: Dice=0.0000, IoU=0.0000, Sens=0.0000
+    3: Dice=0.0000, IoU=0.0000, Sens=0.0000
+
+BraTS_Synth_015:
+  Overall Dice: 0.9956, IoU: 0.9913
+    0: Dice=0.0000, IoU=0.0000, Sens=0.0000
+    1: Dice=0.0000, IoU=0.0000, Sens=0.0000
+    2: Dice=0.0000, IoU=0.0000, Sens=0.0000
+    3: Dice=0.0000, IoU=0.0000, Sens=0.0000
+
+BraTS_Synth_032:
+  Overall Dice: 0.9991, IoU: 0.9982
+    0: Dice=0.0000, IoU=0.0000, Sens=0.0000
+    1: Dice=0.0000, IoU=0.0000, Sens=0.0000
+    2: Dice=0.0000, IoU=0.0000, Sens=0.0000
+    3: Dice=0.0000, IoU=0.0000, Sens=0.0000
+
+BraTS_Synth_083:
+  Overall Dice: 0.9971, IoU: 0.9941
+    0: Dice=0.0000, IoU=0.0000, Sens=0.0000
+    1: Dice=0.0000, IoU=0.0000, Sens=0.0000
+    2: Dice=0.0000, IoU=0.0000, Sens=0.0000
+    3: Dice=0.0000, IoU=0.0000, Sens=0.0000
+
+BraTS_Synth_088:
+  Overall Dice: 0.9980, IoU: 0.9960
+    0: Dice=0.0000, IoU=0.0000, Sens=0.0000
+    1: Dice=0.0000, IoU=0.0000, Sens=0.0000
+    2: Dice=0.0000, IoU=0.0000, Sens=0.0000
+    3: Dice=0.0000, IoU=0.0000, Sens=0.0000

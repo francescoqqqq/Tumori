@@ -1,0 +1,18 @@
+{
+    "channel_names": {
+        "0": "T1",
+        "1": "T1ce",
+        "2": "T2",
+        "3": "FLAIR"
+    },
+    "labels": {
+        "background": 0,
+        "necrotic": 1,
+        "edema": 2,
+        "enhancing": 3
+    },
+    "numTraining": 112,
+    "file_ending": ".nii.gz",
+    "name": "Hybrid_BraTS",
+    "description": "Hybrid Synthetic-Real Dataset for Loss Function Benchmarking"
+}

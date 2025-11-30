@@ -1,0 +1,371 @@
+[
+  {
+    "per_class": {
+      "background": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      },
+      "necrotic": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      },
+      "edema": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      },
+      "enhancing": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      }
+    },
+    "overall": {
+      "dice": 0.9953457638584536,
+      "iou": 0.9907346508398326
+    },
+    "case_id": "BraTS_Real_040"
+  },
+  {
+    "per_class": {
+      "background": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      },
+      "necrotic": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      },
+      "edema": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      },
+      "enhancing": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      }
+    },
+    "overall": {
+      "dice": 0.9946891217865159,
+      "iou": 0.9894343564193357
+    },
+    "case_id": "BraTS_Real_013"
+  },
+  {
+    "per_class": {
+      "background": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      },
+      "necrotic": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      },
+      "edema": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      },
+      "enhancing": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      }
+    },
+    "overall": {
+      "dice": 0.9933456152213873,
+      "iou": 0.9867792066885475
+    },
+    "case_id": "BraTS_Synth_054"
+  },
+  {
+    "per_class": {
+      "background": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      },
+      "necrotic": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      },
+      "edema": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      },
+      "enhancing": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      }
+    },
+    "overall": {
+      "dice": 0.9992387196159116,
+      "iou": 0.9984785974457443
+    },
+    "case_id": "BraTS_Synth_020"
+  },
+  {
+    "per_class": {
+      "background": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      },
+      "necrotic": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      },
+      "edema": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      },
+      "enhancing": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      }
+    },
+    "overall": {
+      "dice": 0.9994931513109309,
+      "iou": 0.9989868161527665
+    },
+    "case_id": "BraTS_Synth_064"
+  },
+  {
+    "per_class": {
+      "background": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      },
+      "necrotic": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      },
+      "edema": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      },
+      "enhancing": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      }
+    },
+    "overall": {
+      "dice": 0.9956311167957452,
+      "iou": 0.991300241818889
+    },
+    "case_id": "BraTS_Synth_015"
+  },
+  {
+    "per_class": {
+      "background": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      },
+      "necrotic": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      },
+      "edema": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      },
+      "enhancing": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      }
+    },
+    "overall": {
+      "dice": 0.9990834556785074,
+      "iou": 0.9981685899255189
+    },
+    "case_id": "BraTS_Synth_032"
+  },
+  {
+    "per_class": {
+      "background": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      },
+      "necrotic": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      },
+      "edema": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      },
+      "enhancing": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      }
+    },
+    "overall": {
+      "dice": 0.9970507675647813,
+      "iou": 0.9941188799196589
+    },
+    "case_id": "BraTS_Synth_083"
+  },
+  {
+    "per_class": {
+      "background": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      },
+      "necrotic": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      },
+      "edema": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      },
+      "enhancing": {
+        "dice": 0.0,
+        "iou": 0.0,
+        "sensitivity": 0.0,
+        "specificity": 0.999999999999999,
+        "pred_volume": 0,
+        "gt_volume": 0
+      }
+    },
+    "overall": {
+      "dice": 0.9979883691159187,
+      "iou": 0.9959848153013827
+    },
+    "case_id": "BraTS_Synth_088"
+  }
+]
