@@ -199,8 +199,9 @@ def test_geometric_model(dataset_id=501, config='2d', fold=0, results_dir='risul
     # Step 1: Run inference if needed
     if not use_existing_predictions:
         print("Step 1: Running nnU-Net inference...")
-        temp_input = os.path.join(results_path, 'temp_input')
-        os.makedirs(temp_input, exist_ok=True)
+        # Use system temp directory instead of results directory for temp files
+        import tempfile
+        temp_input = tempfile.mkdtemp(prefix='nnunet_test_')
         
         images_dir = os.path.join(dataset_path, 'imagesTr')
         for case_id in test_cases:
@@ -209,7 +210,7 @@ def test_geometric_model(dataset_id=501, config='2d', fold=0, results_dir='risul
                 dst = os.path.join(temp_input, f'{case_id}_0000.nii.gz')
                 shutil.copy2(src, dst)
         
-        temp_output = os.path.join(results_path, 'temp_output')
+        temp_output = tempfile.mkdtemp(prefix='nnunet_pred_')
         run_inference(temp_input, temp_output, dataset_id, config, fold)
         prediction_dir = temp_output
     else:
