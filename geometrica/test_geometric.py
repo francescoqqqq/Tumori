@@ -3,11 +3,11 @@ Script per testare nnU-Net sul dataset geometrico e calcolare metriche.
 """
 import os
 import numpy as np
-import nibabel as nib
-import matplotlib.pyplot as plt
+import nibabel as nib  # pyright: ignore[reportMissingImports]
+import matplotlib.pyplot as plt  # pyright: ignore[reportMissingImports]
 from pathlib import Path
 import json
-from tqdm import tqdm
+from tqdm import tqdm  # pyright: ignore[reportMissingModuleSource]
 import subprocess
 import shutil
 
