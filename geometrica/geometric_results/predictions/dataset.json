@@ -1,0 +1,13 @@
+{
+    "channel_names": {
+        "0": "grayscale"
+    },
+    "labels": {
+        "background": 0,
+        "circle": 1
+    },
+    "numTraining": 500,
+    "file_ending": ".nii.gz",
+    "name": "Shapes",
+    "description": "Geometric shapes dataset - segment circles"
+}
