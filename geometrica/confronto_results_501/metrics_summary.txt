@@ -1,0 +1,36 @@
+RIEPILOGO METRICHE - CONFRONTO BASELINE vs GEOMETRIC
+================================================================================
+
+Numero immagini analizzate: 10
+
+BASELINE:
+--------------------------------------------------------------------------------
+DICE                : 0.9702 ± 0.0495  (min: 0.8253, max: 0.9991)
+IOU                 : 0.9461 ± 0.0839  (min: 0.7025, max: 0.9982)
+COMPACTNESS         : 0.8260 ± 0.0726  (min: 0.6496, max: 0.8897)
+SOLIDITY            : 0.9698 ± 0.0221  (min: 0.9240, max: 0.9876)
+ECCENTRICITY        : 0.3488 ± 0.1756  (min: 0.1702, max: 0.8016)
+HAUSDORFF_DISTANCE  : 4.0174 ± 2.6002  (min: 1.0000, max: 9.2195)
+BOUNDARY_IOU        : 0.7449 ± 0.1555  (min: 0.4441, max: 0.9718)
+
+
+GEOMETRIC:
+--------------------------------------------------------------------------------
+DICE                : 0.9434 ± 0.0739  (min: 0.7381, max: 0.9971)
+IOU                 : 0.9009 ± 0.1169  (min: 0.5849, max: 0.9941)
+COMPACTNESS         : 0.7806 ± 0.0965  (min: 0.5533, max: 0.8809)
+SOLIDITY            : 0.9500 ± 0.0311  (min: 0.8992, max: 0.9848)
+ECCENTRICITY        : 0.4135 ± 0.1662  (min: 0.2012, max: 0.8500)
+HAUSDORFF_DISTANCE  : 4.4360 ± 3.6086  (min: 1.0000, max: 12.3693)
+BOUNDARY_IOU        : 0.6864 ± 0.1486  (min: 0.4630, max: 0.9356)
+
+
+MIGLIORAMENTI GEOMETRIC vs BASELINE:
+--------------------------------------------------------------------------------
+DICE                :  -2.76%  (migliore: Baseline)
+IOU                 :  -4.77%  (migliore: Baseline)
+COMPACTNESS         :  -5.51%  (migliore: Baseline)
+SOLIDITY            :  -2.04%  (migliore: Baseline)
+ECCENTRICITY        : -18.54%  (migliore: Baseline)
+HAUSDORFF_DISTANCE  : -10.42%  (migliore: Baseline)
+BOUNDARY_IOU        :  -7.84%  (migliore: Baseline)

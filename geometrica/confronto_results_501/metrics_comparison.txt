@@ -1,0 +1,40 @@
+CONFRONTO METRICHE - BASELINE vs GEOMETRIC
+================================================================================
+
+Numero immagini analizzate: 10
+
+DICE
+  Baseline:  0.9702 ± 0.0495
+  Geometric: 0.9434 ± 0.0739
+  Migliore:  Baseline (-2.8%)
+
+IOU
+  Baseline:  0.9461 ± 0.0839
+  Geometric: 0.9009 ± 0.1169
+  Migliore:  Baseline (-4.8%)
+
+COMPACTNESS
+  Baseline:  0.8260 ± 0.0726
+  Geometric: 0.7806 ± 0.0965
+  Migliore:  Baseline (-5.5%)
+
+SOLIDITY
+  Baseline:  0.9698 ± 0.0221
+  Geometric: 0.9500 ± 0.0311
+  Migliore:  Baseline (-2.0%)
+
+ECCENTRICITY
+  Baseline:  0.3488 ± 0.1756
+  Geometric: 0.4135 ± 0.1662
+  Migliore:  Baseline (-18.5%)
+
+HAUSDORFF_DISTANCE
+  Baseline:  4.0174 ± 2.6002
+  Geometric: 4.4360 ± 3.6086
+  Migliore:  Baseline (-10.4%)
+
+BOUNDARY_IOU
+  Baseline:  0.7449 ± 0.1555
+  Geometric: 0.6864 ± 0.1486
+  Migliore:  Baseline (-7.8%)
+

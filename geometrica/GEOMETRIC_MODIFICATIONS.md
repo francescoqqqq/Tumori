@@ -9,13 +9,99 @@
 
 ## Indice
 
-1. [Panoramica](#panoramica)
-2. [Architettura della Soluzione](#architettura)
-3. [Implementazione Loss Geometrica](#implementazione-loss)
-4. [Modifiche al Trainer nnU-Net](#modifiche-trainer)
-5. [Configurazione e Parametri](#configurazione)
-6. [Workflow Completo](#workflow)
-7. [Risultati e Metriche](#risultati)
+1. [⚠️ CRITICAL FIX - Implementazione Differenziabile](#critical-fix)
+2. [Panoramica](#panoramica)
+3. [Architettura della Soluzione](#architettura)
+4. [Implementazione Loss Geometrica Differenziabile V2](#implementazione-loss)
+5. [Modifiche al Trainer nnU-Net](#modifiche-trainer)
+6. [Configurazione e Parametri](#configurazione)
+7. [Workflow Completo](#workflow)
+8. [Risultati e Metriche](#risultati)
+
+---
+
+## ⚠️ CRITICAL FIX - Implementazione Differenziabile {#critical-fix}
+
+### Problema Critico Scoperto
+
+**Data:** 2025-12-06
+
+L'implementazione originale di `geometric_losses.py` aveva un **bug critico** che impediva alla rete di imparare dai vincoli geometrici:
+
+#### Problemi nell'Implementazione Originale:
+
+1. **Hard Thresholding (linea 69):**
+   ```python
+   # PROBLEMA: Rompe il computational graph!
+   pred_binary = (pred_softmax[:, 1, :, :] > 0.5).float()
+   ```
+   La soglia hard `> 0.5` crea un tensor binario con gradienti zero.
+
+2. **Conversione NumPy (linea 115):**
+   ```python
+   # PROBLEMA: Distrugge i gradienti PyTorch!
+   mask = pred_binary[b].cpu().numpy().astype(np.uint8)
+   ```
+   La conversione a NumPy separa il tensor dal computational graph.
+
+3. **Loss Senza Gradienti (linea 150):**
+   ```python
+   # PROBLEMA: Crea nuovo tensor senza storia di gradiente!
+   return torch.tensor(mean_loss, dtype=torch.float32, device=pred_binary.device)
+   ```
+
+**Risultato:** La rete **NON imparava** dalle loss geometriche - solo da Dice+CE!
+
+### Soluzione: Implementazione Differenziabile V2
+
+Creato `geometric_losses_v2.py` poi rinominato `geometric_losses.py` con:
+
+#### Caratteristiche Chiave:
+
+1. **NO Hard Thresholding:** Usa probabilità soft (valori continui 0-1)
+2. **NO NumPy:** Solo operazioni PyTorch differenziabili
+3. **Fully Vectorized:** Processa l'intero batch senza loop
+
+#### Approssimazioni Differenziabili:
+
+| Metrica | Implementazione Originale | Approssimazione Differenziabile |
+|---------|---------------------------|--------------------------------|
+| **Area** | `np.sum(mask)` | `pred_soft.sum(dim=(1,2))` |
+| **Perimetro** | `cv2.arcLength()` | Magnitudine Sobel gradient |
+| **Convex Hull** | `cv2.convexHull()` | Max pooling (dilation iterata) |
+| **Momenti** | `cv2.moments()` | Coordinate grids ponderati |
+
+#### Test Gradient Flow:
+
+```python
+# Verifica gradienti (test in geometric_losses.py)
+logits = torch.randn(batch_size, 2, img_size, img_size, requires_grad=True)
+pred_softmax = torch.softmax(logits, dim=1)  # Mantiene graph
+
+loss = geom_loss(pred_softmax)
+loss.backward()
+
+# Check gradients su leaf tensor
+grad_mean = logits.grad.abs().mean().item()  # = 0.00000110 ✅ OK!
+```
+
+#### Debug Durante Training:
+
+Aggiunto in `nnUNetTrainerGeometric.py` (linee 207-236):
+```python
+# GRADIENT DEBUGGING: Verifica gradient flow ogni 10 epoche
+if self.current_epoch % self.gradient_check_interval == 0:
+    grad_norms = []
+    for param in self.network.parameters():
+        if param.grad is not None:
+            grad_norms.append(param.grad.abs().mean().item())
+
+    print(f"\n[GRADIENT DEBUG - Epoch {self.current_epoch}]")
+    print(f"  Loss geometrica: {loss_geometric.item():.6f}")
+    print(f"  Gradient mean: {np.mean(grad_norms):.8f}")
+    if np.mean(grad_norms) > 1e-10:
+        print(f"  ✅ GRADIENT FLOW OK!")
+```
 
 ---
 
@@ -45,33 +131,57 @@ L_total = L_dice_ce + 0.1·L_compact + 0.1·L_solid + 0.05·L_eccent + 0.05·L_b
 
 ### File Creati
 
-#### 1. `geometric_losses.py`
-Implementa le 4 loss geometriche come classe PyTorch.
+#### 1. `geometric_losses.py` (DifferentiableGeometricLossesV2)
+Implementa 3 loss geometriche **completamente differenziabili** e **vettorizzate**.
+
+**Classe:** `DifferentiableGeometricLossesV2`
 
 **Funzionalità:**
-- `_compactness_loss()`: Penalizza forme non circolari
-- `_solidity_loss()`: Penalizza concavità e irregolarità
-- `_eccentricity_loss()`: Penalizza forme ellittiche
-- `_boundary_smoothness_loss()`: Penalizza bordi frastagliati
+- `_vectorized_compactness_loss()`: Penalizza forme non circolari (soft area/perimeter)
+- `_vectorized_boundary_loss()`: Penalizza bordi irregolari (Laplacian smoothness)
+- `_vectorized_aspect_loss()`: Penalizza forme ellittiche (momenti di inerzia)
+
+**Caratteristiche:**
+- ✅ **NO NumPy** - Solo PyTorch (mantiene gradienti)
+- ✅ **NO Hard Thresholding** - Usa soft probabilities
+- ✅ **Fully Vectorized** - Processa intero batch in parallelo
+- ✅ **Gradient Flow Verificato** - Test integrato
 
 **Input:** Predizioni softmax `[B, C, H, W]` (C=2: background + cerchi)
-**Output:** Loss scalare differenziabile
+**Output:** Loss scalare differenziabile CON gradienti funzionanti
 
 #### 2. `nnUNetTrainerGeometric.py`
 Estende `nnUNetTrainer` aggiungendo loss geometrica al training loop.
 
 **Modifiche principali:**
-- Override di `train_step()` per calcolare loss geometrica
+- Override di `train_step()` per calcolare loss geometrica differenziabile
 - Warm-up di 5 epoche (solo Dice+CE)
+- **Gradient flow debugging** ogni 10 epoche (verifica backpropagation)
 - Logging separato per componenti loss
 - Batch size ridotto a 8 per memoria GPU
 - 100 epoche totali invece di 250
 
+**Gradient Debugging Output:**
+```
+[GRADIENT DEBUG - Epoch 10]
+  Loss geometrica: 0.012345
+  Gradient mean: 0.00000234
+  ✅ GRADIENT FLOW OK!
+```
+
 ---
 
-## Implementazione Loss Geometrica
+## Implementazione Loss Geometrica Differenziabile V2
 
-### 1. Compactness Loss
+**Classe:** `DifferentiableGeometricLossesV2`
+
+### Principi Chiave
+
+1. **NO Hard Thresholding** - Opera su soft probabilities [0,1]
+2. **NO NumPy** - Solo operazioni PyTorch differenziabili
+3. **Fully Vectorized** - Processa batch completo senza loop
+
+### 1. Vectorized Compactness Loss
 
 **Definizione matematica:**
 ```
@@ -83,182 +193,176 @@ Forma irregolare: C < 1.0
 L_compactness = 1 - C
 ```
 
-**Implementazione:**
+**Implementazione Differenziabile V2:**
 ```python
-def _compactness_loss(self, pred_binary: torch.Tensor) -> torch.Tensor:
-    batch_size = pred_binary.shape[0]
-    losses = []
+def _vectorized_compactness_loss(self, pred_soft: torch.Tensor) -> torch.Tensor:
+    """
+    Args:
+        pred_soft: [B, H, W] soft probabilities (NO thresholding!)
+    """
+    # Soft area (sum of probabilities)
+    area = pred_soft.sum(dim=(1, 2))  # [B]
 
-    for b in range(batch_size):
-        mask = pred_binary[b].cpu().numpy().astype(np.uint8)
+    # Soft perimeter usando Sobel gradients
+    sobel_x = torch.tensor([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], ...)
+    sobel_y = torch.tensor([[-1, -2, -1], [0, 0, 0], [1, 2, 1]], ...)
 
-        # Trova contorni con OpenCV
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL,
-                                       cv2.CHAIN_APPROX_SIMPLE)
+    pred_4d = pred_soft.unsqueeze(1)  # [B, 1, H, W]
+    grad_x = F.conv2d(pred_4d, sobel_x, padding=1)
+    grad_y = F.conv2d(pred_4d, sobel_y, padding=1)
 
-        for contour in contours:
-            area = cv2.contourArea(contour)
-            perimeter = cv2.arcLength(contour, True)
+    # Gradient magnitude = soft boundary
+    grad_mag = torch.sqrt(grad_x**2 + grad_y**2 + 1e-8)
+    perimeter = grad_mag.sum(dim=(1, 2, 3))  # [B]
 
-            if perimeter > 0 and area > self.min_area:
-                compactness = (4 * np.pi * area) / (perimeter ** 2)
-                compactness = min(compactness, 1.0)  # Cap a 1.0
-                loss = 1.0 - compactness
-                losses.append(loss)
+    # Compactness (differentiable)
+    compactness = (4 * math.pi * area) / (perimeter**2 + 1e-4)
+    compactness = torch.clamp(compactness, max=1.0)
 
-    return torch.tensor(np.mean(losses) if losses else 0.0,
-                       device=pred_binary.device)
+    # Loss = 1 - compactness (mean over batch)
+    return (1.0 - compactness).mean()
 ```
+
+**Differenze vs Implementazione Originale:**
+- ❌ **Vecchio**: `mask.cpu().numpy()` → ⚠️ **Rompe gradienti**
+- ✅ **Nuovo**: `pred_soft.sum()` → **Mantiene computational graph**
+- ❌ **Vecchio**: `cv2.arcLength()` → Non differenziabile
+- ✅ **Nuovo**: Sobel gradient magnitude → **Approssimazione differenziabile**
 
 **Effetto:** Favorisce forme circolari, riduce "bozzi" e irregolarità.
 
 ---
 
-### 2. Solidity Loss
+### 2. Vectorized Boundary Smoothness Loss
 
 **Definizione matematica:**
 ```
-Solidity = Area / ConvexHull_Area
+Laplacian = seconda derivata spaziale
 
-Cerchio perfetto: S ≈ 1.0
-Forma con concavità: S < 1.0
-
-L_solidity = 1 - S
+L_boundary = Var(Laplacian) + 0.1·Mean(|Laplacian|)
 ```
 
-**Implementazione:**
+Penalizza bordi irregolari usando il Laplacian (second derivatives). Alta varianza del Laplacian indica bordi frastagliati.
+
+**Implementazione Differenziabile V2:**
 ```python
-def _solidity_loss(self, pred_binary: torch.Tensor) -> torch.Tensor:
-    batch_size = pred_binary.shape[0]
-    losses = []
+def _vectorized_boundary_loss(self, pred_soft: torch.Tensor) -> torch.Tensor:
+    """
+    Args:
+        pred_soft: [B, H, W] soft probabilities
+    """
+    # Laplacian kernel (seconda derivata)
+    laplacian = torch.tensor([[0, 1, 0], [1, -4, 1], [0, 1, 0]], ...)
+    laplacian = laplacian.view(1, 1, 3, 3)
 
-    for b in range(batch_size):
-        mask = pred_binary[b].cpu().numpy().astype(np.uint8)
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL,
-                                       cv2.CHAIN_APPROX_SIMPLE)
+    pred_4d = pred_soft.unsqueeze(1)  # [B, 1, H, W]
 
-        for contour in contours:
-            area = cv2.contourArea(contour)
-            if area > self.min_area:
-                # Convex hull
-                hull = cv2.convexHull(contour)
-                hull_area = cv2.contourArea(hull)
+    # Calcola Laplacian (differentiabile)
+    lap_response = F.conv2d(pred_4d, laplacian, padding=1)  # [B, 1, H, W]
+    lap_response = lap_response.squeeze(1)  # [B, H, W]
 
-                if hull_area > 0:
-                    solidity = area / hull_area
-                    solidity = min(solidity, 1.0)
-                    loss = 1.0 - solidity
-                    losses.append(loss)
+    # Penalizza solo dove la maschera è attiva
+    mask_active = (pred_soft > 0.1).float()  # Soft thresholding (ancora differenziabile)
 
-    return torch.tensor(np.mean(losses) if losses else 0.0,
-                       device=pred_binary.device)
+    # Weighted Laplacian
+    lap_weighted = lap_response * mask_active
+
+    # Loss = varianza + 0.1 * media valore assoluto (batch-wise)
+    var_per_batch = lap_weighted.view(lap_weighted.size(0), -1).var(dim=1).mean()
+    mean_per_batch = lap_weighted.abs().view(lap_weighted.size(0), -1).mean(dim=1).mean()
+
+    return var_per_batch + 0.1 * mean_per_batch
 ```
 
-**Effetto:** Riempie "buchi" e concavità, riduce protrusioni.
+**Differenze vs Implementazione Originale:**
+- ❌ **Vecchio**: `measure.find_contours()` → ⚠️ **Non differenziabile**
+- ✅ **Nuovo**: Laplacian conv → **Approssimazione differenziabile**
+- ❌ **Vecchio**: Loop sui contorni → Lento e non vettorizzato
+- ✅ **Nuovo**: Single conv op → **Processa intero batch in parallelo**
+
+**Effetto:** Smoothens bordi, riduce frastagliature.
 
 ---
 
-### 3. Eccentricity Loss
+### 3. Vectorized Aspect Ratio Loss
 
 **Definizione matematica:**
 ```
-Eccentricity = √(1 - (minor_axis/major_axis)²)
+Aspect Ratio = λ₁ / λ₂  (rapporto eigenvalues momenti secondo ordine)
 
-Cerchio: E ≈ 0
-Ellisse allungata: E → 1
+Cerchio perfetto: AR ≈ 1.0
+Ellisse allungata: AR >> 1.0
 
-L_eccentricity = E
+L_aspect = |AR - 1.0| / (AR + 1.0)
 ```
 
-**Implementazione:**
+**Implementazione Differenziabile V2:**
 ```python
-def _eccentricity_loss(self, pred_binary: torch.Tensor) -> torch.Tensor:
-    batch_size = pred_binary.shape[0]
-    losses = []
+def _vectorized_aspect_loss(self, pred_soft: torch.Tensor) -> torch.Tensor:
+    """
+    Usa momenti di inerzia (fully differentiable).
 
-    for b in range(batch_size):
-        mask = pred_binary[b].cpu().numpy().astype(np.uint8)
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL,
-                                       cv2.CHAIN_APPROX_SIMPLE)
+    Args:
+        pred_soft: [B, H, W]
+    """
+    B, H, W = pred_soft.shape
 
-        for contour in contours:
-            if len(contour) >= 5:  # Minimo 5 punti per ellipse fitting
-                try:
-                    # Fit ellisse
-                    ellipse = cv2.fitEllipse(contour)
-                    major_axis = max(ellipse[1])
-                    minor_axis = min(ellipse[1])
+    # Coordinate grids (differenziabili)
+    y_coords = torch.arange(H, ...).view(1, H, 1).expand(B, H, W)
+    x_coords = torch.arange(W, ...).view(1, 1, W).expand(B, H, W)
 
-                    if major_axis > 0:
-                        eccentricity = np.sqrt(1 - (minor_axis/major_axis)**2)
-                        losses.append(eccentricity)
-                except:
-                    pass
+    # Soft area per batch
+    area = pred_soft.sum(dim=(1, 2), keepdim=True) + 1e-4  # [B, 1, 1]
 
-    return torch.tensor(np.mean(losses) if losses else 0.0,
-                       device=pred_binary.device)
+    # Centro di massa ponderato (differenziabile)
+    x_center = (pred_soft * x_coords).sum(dim=(1, 2), keepdim=True) / area
+    y_center = (pred_soft * y_coords).sum(dim=(1, 2), keepdim=True) / area
+
+    # Momenti secondo ordine
+    x_diff = x_coords - x_center
+    y_diff = y_coords - y_center
+
+    mu_20 = (pred_soft * x_diff**2).sum(dim=(1, 2)) / area.squeeze()  # [B]
+    mu_02 = (pred_soft * y_diff**2).sum(dim=(1, 2)) / area.squeeze()
+    mu_11 = (pred_soft * x_diff * y_diff).sum(dim=(1, 2)) / area.squeeze()
+
+    # Eigenvalues (assi principali) - differenziabile!
+    trace = mu_20 + mu_02
+    det = mu_20 * mu_02 - mu_11**2
+
+    sqrt_term = torch.sqrt(torch.clamp(trace**2 - 4*det, min=0))
+    lambda1 = (trace + sqrt_term) / 2 + 1e-4  # Maggiore
+    lambda2 = (trace - sqrt_term) / 2 + 1e-4  # Minore
+
+    # Aspect ratio
+    aspect_ratio = lambda1 / lambda2
+
+    # Loss: penalizza ratio lontano da 1 (cerchio perfetto)
+    loss = torch.abs(aspect_ratio - 1.0) / (aspect_ratio + 1.0)
+    return loss.mean()  # Media su batch
 ```
 
-**Effetto:** Favorisce forme circolari rispetto a ellissi.
+**Differenze vs Implementazione Originale:**
+- ❌ **Vecchio**: `cv2.fitEllipse()` → ⚠️ **Non differenziabile**
+- ✅ **Nuovo**: Moment matrix eigenvalues → **Approssimazione differenziabile**
+- ❌ **Vecchio**: Loop su batch → Non vettorizzato
+- ✅ **Nuovo**: Coordinate grids → **Processa intero batch in parallelo**
+
+**Effetto:** Favorisce forme circolari rispetto a ellissi allungate.
 
 ---
 
-### 4. Boundary Smoothness Loss
+### Nota: Solidity Loss Rimossa
 
-**Definizione matematica:**
+La **Solidity Loss** (Area/ConvexHull) è stata **rimossa** nella V2 perché:
+1. Convex Hull non ha approssimazione differenziabile efficiente
+2. Compactness + Boundary già penalizzano concavità implicitamente
+3. Semplifica il modello e riduce rischio overfitting
+
+**Formula Loss Totale V2:**
 ```
-Curvatura locale: k(i) = angolo tra vettori consecutivi
-Smoothness = Var(k) + 0.1·Mean(|k|)
-
-L_boundary = Var(curvature) + λ·Mean(|curvature|)
+L_total = L_dice_ce + 0.05·L_compact + 0.05·L_boundary + 0.02·L_aspect
 ```
-
-**Implementazione:**
-```python
-def _boundary_smoothness_loss(self, pred_binary: torch.Tensor) -> torch.Tensor:
-    batch_size = pred_binary.shape[0]
-    losses = []
-
-    for b in range(batch_size):
-        mask = pred_binary[b].cpu().numpy().astype(np.uint8)
-
-        # Trova contorni con skimage
-        contours = measure.find_contours(mask, 0.5)
-
-        for contour in contours:
-            if len(contour) < 3:
-                continue
-
-            curvatures = []
-            for i in range(1, len(contour) - 1):
-                p1, p2, p3 = contour[i-1], contour[i], contour[i+1]
-
-                # Vettori consecutivi
-                v1 = p2 - p1
-                v2 = p3 - p2
-
-                # Angolo tra vettori
-                angle1 = np.arctan2(v1[1], v1[0])
-                angle2 = np.arctan2(v2[1], v2[0])
-                curvature = np.abs(angle2 - angle1)
-
-                # Normalizza [0, π]
-                if curvature > np.pi:
-                    curvature = 2*np.pi - curvature
-
-                curvatures.append(curvature)
-
-            if len(curvatures) > 0:
-                var_loss = np.var(curvatures)
-                mean_loss = np.mean(np.abs(curvatures))
-                loss = var_loss + 0.1 * mean_loss
-                losses.append(loss)
-
-    return torch.tensor(np.mean(losses) if losses else 0.0,
-                       device=pred_binary.device)
-```
-
-**Effetto:** Riduce "seghettature", rende i contorni smooth.
 
 ---
 

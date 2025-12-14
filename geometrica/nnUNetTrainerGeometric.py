@@ -9,9 +9,9 @@ Date: 2025-12-05
 
 """
 
-from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
-from nnunetv2.training.nnUNetTrainer.geometric_losses import GeometricLosses
-import torch
+from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer  # pyright: ignore[reportMissingImports]
+from nnunetv2.training.nnUNetTrainer.geometric_losses import GeometricLosses  # pyright: ignore[reportMissingImports]
+import torch  # pyright: ignore[reportMissingImports]
 import numpy as np
 from typing import Union, Tuple, List
 import os
@@ -83,29 +83,32 @@ class nnUNetTrainerGeometric(nnUNetTrainer):
         # Numero di campioni su cui calcolare loss geometrica (per risparmiare memoria)
         self.geometric_loss_samples = 4  # Solo primi 4 campioni del batch
 
-        # Inizializza loss geometrica con pesi dal design document
+        # Inizializza loss geometrica con pesi RIDOTTI per stabilità (10x più piccoli)
         self.geometric_loss = GeometricLosses(
-            weight_compactness=0.1,
-            weight_solidity=0.1,
-            weight_eccentricity=0.05,
-            weight_boundary=0.05,
+            weight_compactness=0.01,  # Ridotto da 0.1
+            weight_solidity=0.01,     # Ridotto da 0.1
+            weight_eccentricity=0.005,  # Ridotto da 0.05
+            weight_boundary=0.005,    # Ridotto da 0.05
             min_area=10
         )
 
         # Flag per attivare/disattivare loss geometrica
         self.use_geometric_loss = True
 
-        # Warm-up: attiva loss geometrica solo dopo N epoche
-        self.geometric_loss_warmup_epochs = 5  # Primi 5 epoche solo Dice+CE (poi 95 con geometric)
+        # Warm-up: attiva loss geometrica solo dopo N epoche (AUMENTATO per stabilità)
+        self.geometric_loss_warmup_epochs = 20  # Primi 20 epoche solo Dice+CE (poi 80 con geometric)
 
         # Override numero epoche a 100 (invece di 250 default)
         self.num_epochs = 100
 
         # Storage per logging loss geometrica
         self.geometric_loss_log = []
+        
+        # Gradient debugging: verifica gradient flow ogni N epoche
+        self.gradient_check_interval = 10  # Ogni 10 epoche
 
         print(f"\n{'='*60}")
-        print("nnUNetTrainerGeometric inizializzato")
+        print("nnUNetTrainerGeometric inizializzato (V2.4 - FIX gradienti esplosivi sqrt)")
         print(f"{'='*60}")
         print(f"Numero epoche: {self.num_epochs}")
         print(f"Batch size effettivo: 8 (ridotto per risparmiare memoria)")
@@ -115,7 +118,7 @@ class nnUNetTrainerGeometric(nnUNetTrainer):
         print(f"Warm-up epoche: {self.geometric_loss_warmup_epochs}")
         print(f"  (epoche 0-{self.geometric_loss_warmup_epochs-1}: solo Dice+CE)")
         print(f"  (epoche {self.geometric_loss_warmup_epochs}-{self.num_epochs-1}: Dice+CE + Geometric)")
-        print(f"\nPesi loss geometrica:")
+        print(f"\nPesi loss geometrica (ridotti 10x per stabilità):")
         print(f"  - Compactness: {self.geometric_loss.weight_compactness}")
         print(f"  - Solidity: {self.geometric_loss.weight_solidity}")
         print(f"  - Eccentricity: {self.geometric_loss.weight_eccentricity}")
@@ -191,19 +194,79 @@ class nnUNetTrainerGeometric(nnUNetTrainer):
             except Exception as e:
                 # Se loss geometrica fallisce, logga warning e continua
                 # Non loggare ogni volta per evitare spam (solo ogni 10 epoche)
+                print(f"⚠️  WARNING [Epoch {self.current_epoch}]: Geometric loss failed with exception: {e}")
                 loss_geometric = torch.tensor(0.0, device=self.device)
 
         # Loss totale
         total_loss = loss_dice_ce + loss_geometric
 
+        # SAFETY CHECK: Verifica che total_loss non sia NaN PRIMA del backward
+        if torch.isnan(total_loss) or torch.isinf(total_loss):
+            # Log dettagliato per debugging
+            print(f"\n{'='*70}")
+            print(f"⚠️  WARNING [Epoch {self.current_epoch}]: Loss totale è NaN/Inf!")
+            print(f"   Dice+CE loss: {loss_dice_ce.item() if not torch.isnan(loss_dice_ce) else 'NaN'}")
+            print(f"   Geometric loss: {loss_geometric.item() if not torch.isnan(loss_geometric) else 'NaN'}")
+            print(f"   Total loss: {total_loss.item()}")
+            if hasattr(self.geometric_loss, 'get_last_losses'):
+                geom_components = self.geometric_loss.get_last_losses()
+                print(f"   Componenti geometric: {geom_components}")
+            print(f"{'='*70}\n")
+
+            # FALLBACK: Usa solo Dice+CE se geometric causa NaN
+            total_loss = loss_dice_ce
+
         # MEMORY OPTIMIZATION: Pulisci cache CUDA prima del backward
         torch.cuda.empty_cache()
 
+        # SAFETY CHECK FINALE: Verifica che total_loss sia ancora valido prima di backward
+        if torch.isnan(total_loss) or torch.isinf(total_loss):
+            print(f"\n⚠️  WARNING [Epoch {self.current_epoch}]: total_loss è NaN/Inf PRIMA del backward!")
+            print(f"   Skipping backward pass per evitare corruzione gradienti.")
+            self.optimizer.zero_grad(set_to_none=True)
+            return {'loss': torch.tensor(0.0, device=self.device).cpu().numpy()}
+
         # Backward e step optimizer
-        total_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.network.parameters(), 12)
-        self.optimizer.step()
-        
+        try:
+            total_loss.backward()
+        except RuntimeError as e:
+            if 'nan' in str(e).lower() or 'inf' in str(e).lower():
+                print(f"\n⚠️  WARNING [Epoch {self.current_epoch}]: Errore durante backward: {e}")
+                print(f"   Skipping optimizer step per evitare corruzione.")
+                self.optimizer.zero_grad(set_to_none=True)
+                return {'loss': torch.tensor(0.0, device=self.device).cpu().numpy()}
+            else:
+                raise
+
+        # Gradient clipping per stabilità (con controllo NaN)
+        try:
+            grad_norm = torch.nn.utils.clip_grad_norm_(self.network.parameters(), 12)
+            if torch.isnan(grad_norm) or torch.isinf(grad_norm):
+                print(f"\n⚠️  WARNING [Epoch {self.current_epoch}]: grad_norm è NaN/Inf dopo clipping!")
+                self.optimizer.zero_grad(set_to_none=True)
+                return {'loss': torch.tensor(0.0, device=self.device).cpu().numpy()}
+        except RuntimeError as e:
+            print(f"\n⚠️  WARNING [Epoch {self.current_epoch}]: Errore durante gradient clipping: {e}")
+            self.optimizer.zero_grad(set_to_none=True)
+            return {'loss': torch.tensor(0.0, device=self.device).cpu().numpy()}
+
+        # SAFETY CHECK: Verifica gradienti per NaN
+        has_nan_grad = False
+        nan_param_name = None
+        for name, param in self.network.named_parameters():
+            if param.grad is not None:
+                if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
+                    has_nan_grad = True
+                    nan_param_name = name
+                    break
+
+        if has_nan_grad:
+            print(f"\n⚠️  WARNING [Epoch {self.current_epoch}]: Gradient NaN/Inf in {nan_param_name}")
+            print(f"   Skipping optimizer step due to NaN gradients.")
+            self.optimizer.zero_grad(set_to_none=True)
+        else:
+            self.optimizer.step()
+
         # MEMORY OPTIMIZATION: Pulisci cache dopo lo step
         torch.cuda.empty_cache()
 
@@ -226,6 +289,19 @@ class nnUNetTrainerGeometric(nnUNetTrainer):
             avg_dice_ce = np.mean([x['dice_ce'] for x in self.geometric_loss_log])
             avg_geometric = np.mean([x['geometric'] for x in self.geometric_loss_log])
             avg_total = np.mean([x['total'] for x in self.geometric_loss_log])
+
+            # LOGGING PERIODICO: Stampa loss dettagliate ogni 10 epoche
+            if self.current_epoch % 10 == 0 and self.use_geometric_loss and self.current_epoch >= self.geometric_loss_warmup_epochs:
+                print(f"\n{'='*70}")
+                print(f"[EPOCH {self.current_epoch}] Loss Breakdown:")
+                print(f"  Dice+CE:    {avg_dice_ce:.6f}")
+                print(f"  Geometric:  {avg_geometric:.6f}")
+                print(f"  Total:      {avg_total:.6f}")
+                if hasattr(self.geometric_loss, 'get_last_losses'):
+                    geom_comp = self.geometric_loss.get_last_losses()
+                    print(f"  Components: compactness={geom_comp.get('compactness', 0):.6f}, "
+                          f"boundary={geom_comp.get('boundary', 0):.6f}, aspect={geom_comp.get('aspect', 0):.6f}")
+                print(f"{'='*70}\n")
 
             # Log su tensorboard/file
             # Il logger nnU-Net richiede che le chiavi siano inizializzate prima
@@ -270,6 +346,24 @@ class nnUNetTrainerGeometric(nnUNetTrainer):
                     print(f"\nGeometric Components:")
                     for key, value in last_losses.items():
                         print(f"  - {key:15s}: {value:.4f}")
+                
+                # GRADIENT DEBUGGING: Verifica gradient flow
+                if self.current_epoch % self.gradient_check_interval == 0 and self.current_epoch >= self.geometric_loss_warmup_epochs:
+                    grad_norms = []
+                    for param in self.network.parameters():
+                        if param.grad is not None:
+                            grad_norms.append(param.grad.abs().mean().item())
+                    
+                    if len(grad_norms) > 0:
+                        grad_mean = np.mean(grad_norms)
+                        print(f"\n[GRADIENT DEBUG - Epoch {self.current_epoch}]")
+                        print(f"  Loss geometrica: {avg_geometric:.6f}")
+                        print(f"  Gradient mean: {grad_mean:.8f}")
+                        if grad_mean > 1e-10:
+                            print(f"  ✅ GRADIENT FLOW OK!")
+                        else:
+                            print(f"  ⚠️  WARNING: Gradient mean < 1e-10 - gradienti troppo piccoli!")
+                
                 print(f"{'='*60}\n")
 
             # Reset log

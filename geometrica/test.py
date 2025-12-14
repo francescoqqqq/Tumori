@@ -14,22 +14,92 @@ Date: 2025-12-05
 import os
 import sys
 import json
+import re
 import numpy as np
-import nibabel as nib
-import cv2
-import matplotlib.pyplot as plt
+import nibabel as nib  # pyright: ignore[reportMissingImports]
+import cv2  # pyright: ignore[reportMissingImports]
+import matplotlib.pyplot as plt  # pyright: ignore[reportMissingImports]
 from pathlib import Path
-from scipy import ndimage
-from scipy.spatial.distance import directed_hausdorff
-from skimage import measure
+from scipy import ndimage  # pyright: ignore[reportMissingImports]
+from scipy.spatial.distance import directed_hausdorff  # pyright: ignore[reportMissingImports]
+from skimage import measure  # pyright: ignore[reportMissingImports]
 
-# Constants
-DATASET_ID = 501
-OUTPUT_DIRS = {
-    'baseline': 'baseline_results',
-    'geometric': 'geometric_results',
-    'confronto': 'confronto_results'
-}
+
+def print_header(text):
+    """Stampa header formattato."""
+    print(f"\n{'='*70}")
+    print(f"  {text}")
+    print(f"{'='*70}\n")
+
+
+def print_option(number, text, description=""):
+    """Stampa opzione numerata."""
+    print(f"  [{number}] {text}")
+    if description:
+        print(f"      {description}")
+
+
+def get_available_datasets():
+    """Scansiona nnUNet_preprocessed per trovare i dataset disponibili."""
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    preprocessed_dir = os.path.join(base_dir, 'nnUNet_preprocessed')
+    
+    if not os.path.exists(preprocessed_dir):
+        return []
+    
+    datasets = []
+    for item in os.listdir(preprocessed_dir):
+        item_path = os.path.join(preprocessed_dir, item)
+        if os.path.isdir(item_path) and item.startswith('Dataset'):
+            # Estrai l'ID numerico dal nome (es. "Dataset501_Shapes" -> 501)
+            match = re.match(r'Dataset(\d+)_', item)
+            if match:
+                dataset_id = int(match.group(1))
+                datasets.append((dataset_id, item))
+    
+    # Ordina per ID
+    datasets.sort(key=lambda x: x[0])
+    return datasets
+
+
+def get_dataset_choice():
+    """Chiede all'utente quale dataset usare per l'analisi."""
+    print_header("SCELTA DATASET")
+    
+    datasets = get_available_datasets()
+    
+    if not datasets:
+        print("❌ ERRORE: Nessun dataset trovato in nnUNet_preprocessed!")
+        print(f"   Directory: {os.path.join(os.path.dirname(os.path.abspath(__file__)), 'nnUNet_preprocessed')}")
+        print("\n   Assicurati di aver eseguito il preprocessing dei dataset.")
+        return None
+    
+    print(f"Trovati {len(datasets)} dataset(s) preprocessati:\n")
+    
+    for idx, (dataset_id, dataset_name) in enumerate(datasets, 1):
+        print_option(idx, f"Dataset{dataset_id}", f"{dataset_name}")
+    
+    while True:
+        try:
+            choice = input(f"\nScegli il dataset (1-{len(datasets)}): ").strip()
+            choice_num = int(choice)
+            if 1 <= choice_num <= len(datasets):
+                selected_id, selected_name = datasets[choice_num - 1]
+                print(f"\n✅ Dataset selezionato: Dataset{selected_id} ({selected_name})")
+                return selected_id, selected_name
+            else:
+                print(f"Scelta non valida! Inserisci un numero tra 1 e {len(datasets)}.")
+        except ValueError:
+            print("Input non valido! Inserisci un numero.")
+
+
+def get_output_dirs(dataset_id):
+    """Restituisce i nomi delle cartelle di output in base al dataset."""
+    return {
+        'baseline': f'baseline_results_{dataset_id}',
+        'geometric': f'geometric_results_{dataset_id}',
+        'confronto': f'confronto_results_{dataset_id}'
+    }
 
 
 def load_nifti(path):
@@ -257,7 +327,7 @@ def create_visualization(img_original, pred, gt, case_id, output_dir, metrics, t
     axes[3].axis('off')
 
     # Aggiungi legenda per overlap
-    from matplotlib.patches import Patch
+    from matplotlib.patches import Patch  # pyright: ignore[reportMissingImports]
     legend_elements = [
         Patch(facecolor='green', alpha=0.6, label='Corretto (TP)'),
         Patch(facecolor='red', alpha=0.6, label='Mancato (FN)'),
@@ -280,76 +350,101 @@ def create_visualization(img_original, pred, gt, case_id, output_dir, metrics, t
 
 def create_comparison_visualization(img_original, pred_baseline, pred_geometric, gt, case_id, output_dir):
     """
-    Crea visualizzazione confronto con 5 pannelli:
-    1. Originale
-    2. GT
-    3. Baseline
-    4. Geometric
-    5. Confronto overlap
+    Crea visualizzazione confronto con 2 righe x 4 colonne:
+    Riga 1 (Baseline): Originale | GT | Baseline Pred | Baseline Overlap
+    Riga 2 (Geometric): Originale | GT | Geometric Pred | Geometric Overlap
     """
-    fig, axes = plt.subplots(1, 5, figsize=(25, 5))
+    fig, axes = plt.subplots(2, 4, figsize=(20, 10))
 
     # Binarizza
     pred_baseline_bin = pred_baseline > 0.5
     pred_geometric_bin = pred_geometric > 0.5
     gt_binary = gt > 0.5
 
+    # ==================== RIGA 1: BASELINE ====================
     # 1. Originale
-    axes[0].imshow(img_original, cmap='gray', vmin=0, vmax=255)
-    axes[0].set_title('Originale', fontsize=12, fontweight='bold')
-    axes[0].axis('off')
+    axes[0, 0].imshow(img_original, cmap='gray', vmin=0, vmax=255)
+    axes[0, 0].set_title('Originale', fontsize=12, fontweight='bold')
+    axes[0, 0].axis('off')
 
     # 2. GT
     gt_display = np.zeros_like(img_original)
     gt_display[gt_binary] = 255
-    axes[1].imshow(gt_display, cmap='gray', vmin=0, vmax=255)
-    axes[1].set_title('Ground Truth', fontsize=12, fontweight='bold')
-    axes[1].axis('off')
+    axes[0, 1].imshow(gt_display, cmap='gray', vmin=0, vmax=255)
+    axes[0, 1].set_title('Ground Truth', fontsize=12, fontweight='bold')
+    axes[0, 1].axis('off')
 
-    # 3. Baseline
+    # 3. Baseline Prediction
     baseline_display = np.zeros_like(img_original)
     baseline_display[pred_baseline_bin] = 255
-    axes[2].imshow(baseline_display, cmap='gray', vmin=0, vmax=255)
-    axes[2].set_title('Baseline', fontsize=12, fontweight='bold')
-    axes[2].axis('off')
+    axes[0, 2].imshow(baseline_display, cmap='gray', vmin=0, vmax=255)
+    axes[0, 2].set_title('Baseline Prediction', fontsize=12, fontweight='bold')
+    axes[0, 2].axis('off')
 
-    # 4. Geometric
+    # 4. Baseline Overlap Analysis
+    baseline_overlap = np.zeros((img_original.shape[0], img_original.shape[1], 4), dtype=np.float32)
+    baseline_tp = pred_baseline_bin & gt_binary  # True Positive
+    baseline_fn = ~pred_baseline_bin & gt_binary  # False Negative
+    baseline_fp = pred_baseline_bin & ~gt_binary  # False Positive
+
+    baseline_overlap[baseline_tp] = [0, 1, 0, 0.7]  # Verde - TP
+    baseline_overlap[baseline_fn] = [1, 0, 0, 0.7]  # Rosso - FN
+    baseline_overlap[baseline_fp] = [1, 1, 0, 0.7]  # Giallo - FP
+
+    axes[0, 3].imshow(img_original, cmap='gray', alpha=0.2, vmin=0, vmax=255)
+    axes[0, 3].imshow(baseline_overlap)
+    axes[0, 3].set_title('Baseline Overlap', fontsize=12, fontweight='bold')
+    axes[0, 3].axis('off')
+
+    # Legenda Baseline
+    from matplotlib.patches import Patch  # pyright: ignore[reportMissingImports]
+    legend_baseline = [
+        Patch(facecolor='green', alpha=0.7, label='TP'),
+        Patch(facecolor='red', alpha=0.7, label='FN'),
+        Patch(facecolor='yellow', alpha=0.7, label='FP')
+    ]
+    axes[0, 3].legend(handles=legend_baseline, loc='upper right', fontsize=9)
+
+    # ==================== RIGA 2: GEOMETRIC ====================
+    # 1. Originale
+    axes[1, 0].imshow(img_original, cmap='gray', vmin=0, vmax=255)
+    axes[1, 0].set_title('Originale', fontsize=12, fontweight='bold')
+    axes[1, 0].axis('off')
+
+    # 2. GT
+    axes[1, 1].imshow(gt_display, cmap='gray', vmin=0, vmax=255)
+    axes[1, 1].set_title('Ground Truth', fontsize=12, fontweight='bold')
+    axes[1, 1].axis('off')
+
+    # 3. Geometric Prediction
     geometric_display = np.zeros_like(img_original)
     geometric_display[pred_geometric_bin] = 255
-    axes[3].imshow(geometric_display, cmap='gray', vmin=0, vmax=255)
-    axes[3].set_title('Geometric', fontsize=12, fontweight='bold')
-    axes[3].axis('off')
+    axes[1, 2].imshow(geometric_display, cmap='gray', vmin=0, vmax=255)
+    axes[1, 2].set_title('Geometric Prediction', fontsize=12, fontweight='bold')
+    axes[1, 2].axis('off')
 
-    # 5. Confronto - mostra differenze
-    # Verde: entrambi corretti
-    # Rosso: solo baseline corretto
-    # Blu: solo geometric corretto
-    comparison = np.zeros((img_original.shape[0], img_original.shape[1], 4), dtype=np.float32)
+    # 4. Geometric Overlap Analysis
+    geometric_overlap = np.zeros((img_original.shape[0], img_original.shape[1], 4), dtype=np.float32)
+    geometric_tp = pred_geometric_bin & gt_binary  # True Positive
+    geometric_fn = ~pred_geometric_bin & gt_binary  # False Negative
+    geometric_fp = pred_geometric_bin & ~gt_binary  # False Positive
 
-    baseline_correct = pred_baseline_bin & gt_binary
-    geometric_correct = pred_geometric_bin & gt_binary
+    geometric_overlap[geometric_tp] = [0, 1, 0, 0.7]  # Verde - TP
+    geometric_overlap[geometric_fn] = [1, 0, 0, 0.7]  # Rosso - FN
+    geometric_overlap[geometric_fp] = [1, 1, 0, 0.7]  # Giallo - FP
 
-    both_correct = baseline_correct & geometric_correct
-    only_baseline = baseline_correct & ~geometric_correct
-    only_geometric = ~baseline_correct & geometric_correct
+    axes[1, 3].imshow(img_original, cmap='gray', alpha=0.2, vmin=0, vmax=255)
+    axes[1, 3].imshow(geometric_overlap)
+    axes[1, 3].set_title('Geometric Overlap', fontsize=12, fontweight='bold')
+    axes[1, 3].axis('off')
 
-    comparison[both_correct] = [0, 1, 0, 0.7]  # Verde - entrambi corretti
-    comparison[only_baseline] = [1, 0, 0, 0.7]  # Rosso - solo baseline
-    comparison[only_geometric] = [0, 0, 1, 0.7]  # Blu - solo geometric
-
-    axes[4].imshow(img_original, cmap='gray', alpha=0.2, vmin=0, vmax=255)
-    axes[4].imshow(comparison)
-    axes[4].set_title('Confronto Prestazioni', fontsize=12, fontweight='bold')
-    axes[4].axis('off')
-
-    # Legenda
-    from matplotlib.patches import Patch
-    legend_elements = [
-        Patch(facecolor='green', alpha=0.7, label='Entrambi corretti'),
-        Patch(facecolor='red', alpha=0.7, label='Solo Baseline'),
-        Patch(facecolor='blue', alpha=0.7, label='Solo Geometric')
+    # Legenda Geometric
+    legend_geometric = [
+        Patch(facecolor='green', alpha=0.7, label='TP'),
+        Patch(facecolor='red', alpha=0.7, label='FN'),
+        Patch(facecolor='yellow', alpha=0.7, label='FP')
     ]
-    axes[4].legend(handles=legend_elements, loc='upper right', fontsize=9)
+    axes[1, 3].legend(handles=legend_geometric, loc='upper right', fontsize=9)
 
     # Calcola metriche per confronto
     dice_b = calculate_dice(pred_baseline, gt)
@@ -357,10 +452,20 @@ def create_comparison_visualization(img_original, pred_baseline, pred_geometric,
     comp_b = calculate_compactness(pred_baseline)
     comp_g = calculate_compactness(pred_geometric)
 
-    metrics_text = f"Dice: B={dice_b:.3f} G={dice_g:.3f} | Compactness: B={comp_b:.3f} G={comp_g:.3f}"
-    fig.suptitle(f'{case_id} - {metrics_text}', fontsize=11, fontweight='bold', y=0.98)
+    # Titolo principale
+    fig.suptitle(f'{case_id} - Confronto Baseline vs Geometric', fontsize=14, fontweight='bold', y=0.98)
 
-    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    # Aggiungi etichetta laterale per le righe
+    fig.text(0.02, 0.75, 'BASELINE', va='center', rotation='vertical',
+             fontsize=14, fontweight='bold', color='darkblue')
+    fig.text(0.02, 0.25, 'GEOMETRIC', va='center', rotation='vertical',
+             fontsize=14, fontweight='bold', color='darkgreen')
+
+    # Aggiungi metriche come testo in basso
+    metrics_text = f"Baseline: Dice={dice_b:.3f}, Compactness={comp_b:.3f}  |  Geometric: Dice={dice_g:.3f}, Compactness={comp_g:.3f}"
+    fig.text(0.5, 0.02, metrics_text, ha='center', fontsize=10, fontweight='bold')
+
+    plt.tight_layout(rect=[0.03, 0.04, 1, 0.96])
     output_path = os.path.join(output_dir, f'{case_id}_comparison.png')
     plt.savefig(output_path, dpi=150, bbox_inches='tight')
     plt.close()
@@ -444,18 +549,21 @@ def create_metrics_comparison_chart(baseline_metrics, geometric_metrics, output_
     return output_path
 
 
-def process_single_model(model_name, output_subdir, num_images=None):
+def process_single_model(model_name, dataset_id, dataset_name, output_subdir, num_images=None):
     """Processa risultati per un singolo modello."""
     base_dir = os.path.dirname(os.path.abspath(__file__))
     output_dir = os.path.join(base_dir, output_subdir)
-    predictions_dir = os.path.join(output_dir, 'predictions')
     visualizations_dir = os.path.join(output_dir, 'visualizations')
     os.makedirs(visualizations_dir, exist_ok=True)
 
+    # Predizioni dalla nuova struttura: predictions/{dataset_id}{model_name}/
+    predictions_dir = os.path.join(base_dir, 'predictions', f'{dataset_id}{model_name}')
+    
     # Verifica che esistano predizioni
     if not os.path.exists(predictions_dir):
         print(f"❌ Errore: Directory predizioni non trovata: {predictions_dir}")
-        print(f"   Esegui prima: python run_inference.py --{model_name}")
+        print(f"   Esegui prima: python run_inference.py")
+        print(f"   Seleziona dataset {dataset_id} e modello {model_name}")
         return False
 
     # Setup environment
@@ -467,15 +575,27 @@ def process_single_model(model_name, output_subdir, num_images=None):
 
     if len(pred_files) == 0:
         print(f"❌ Errore: Nessuna predizione trovata in {predictions_dir}")
-        print(f"   Esegui prima: python run_inference.py --{model_name}")
+        print(f"   Esegui prima: python run_inference.py")
+        print(f"   Seleziona dataset {dataset_id} e modello {model_name}")
         return False
 
     if num_images:
         pred_files = pred_files[:num_images]
 
-    print(f"\n📊 Processando {len(pred_files)} immagini per {model_name}...")
+    print(f"\n📊 Processando {len(pred_files)} immagini per {model_name} (Dataset {dataset_id})...")
 
     all_metrics = []
+
+    # Trova il nome completo del dataset in nnUNet_raw
+    raw_dataset_name = None
+    for item in os.listdir(raw_dir) if os.path.exists(raw_dir) else []:
+        if os.path.isdir(os.path.join(raw_dir, item)) and item.startswith(f'Dataset{dataset_id:03d}_'):
+            raw_dataset_name = item
+            break
+    
+    if not raw_dataset_name:
+        print(f"❌ Dataset {dataset_id} non trovato in nnUNet_raw")
+        return False
 
     for idx, pred_file in enumerate(pred_files):
         case_id = pred_file.replace('.nii.gz', '')
@@ -485,7 +605,7 @@ def process_single_model(model_name, output_subdir, num_images=None):
         pred = load_nifti(pred_path)
 
         # Carica GT
-        gt_path = os.path.join(raw_dir, f'Dataset{DATASET_ID:03d}_Shapes', 'labelsTr', f'{case_id}.nii.gz')
+        gt_path = os.path.join(raw_dir, raw_dataset_name, 'labelsTr', f'{case_id}.nii.gz')
         if not os.path.exists(gt_path):
             print(f"⚠️  GT non trovato per {case_id}, skip")
             continue
@@ -493,7 +613,7 @@ def process_single_model(model_name, output_subdir, num_images=None):
         gt = load_nifti(gt_path)
 
         # Carica immagine originale
-        img_path = os.path.join(raw_dir, f'Dataset{DATASET_ID:03d}_Shapes', 'imagesTr', f'{case_id}_0000.nii.gz')
+        img_path = os.path.join(raw_dir, raw_dataset_name, 'imagesTr', f'{case_id}_0000.nii.gz')
         if not os.path.exists(img_path):
             print(f"⚠️  Immagine originale non trovata per {case_id}, skip")
             continue
@@ -556,28 +676,32 @@ def process_single_model(model_name, output_subdir, num_images=None):
     return aggregate_metrics
 
 
-def process_comparison(num_images=None):
+def process_comparison(dataset_id, dataset_name, output_dir_name, num_images=None):
     """Processa confronto tra baseline e geometric."""
     base_dir = os.path.dirname(os.path.abspath(__file__))
 
-    # Directory input
-    baseline_pred_dir = os.path.join(base_dir, OUTPUT_DIRS['baseline'], 'predictions')
-    geometric_pred_dir = os.path.join(base_dir, OUTPUT_DIRS['geometric'], 'predictions')
+    # Directory input dalla nuova struttura: predictions/{dataset_id}{model_name}/
+    baseline_pred_dir = os.path.join(base_dir, 'predictions', f'{dataset_id}baseline')
+    geometric_pred_dir = os.path.join(base_dir, 'predictions', f'{dataset_id}geometric')
 
     # Directory output
-    output_dir = os.path.join(base_dir, OUTPUT_DIRS['confronto'])
+    output_dir = os.path.join(base_dir, output_dir_name)
     visualizations_dir = os.path.join(output_dir, 'visualizations')
     os.makedirs(visualizations_dir, exist_ok=True)
 
     # Verifica che esistano predizioni per entrambi
     if not os.path.exists(baseline_pred_dir):
         print(f"❌ Errore: Predizioni baseline non trovate!")
-        print(f"   Esegui prima: python run_inference.py --baseline")
+        print(f"   Directory: {baseline_pred_dir}")
+        print(f"   Esegui prima: python run_inference.py")
+        print(f"   Seleziona dataset {dataset_id} e modello baseline")
         return False
 
     if not os.path.exists(geometric_pred_dir):
         print(f"❌ Errore: Predizioni geometric non trovate!")
-        print(f"   Esegui prima: python run_inference.py --geometric")
+        print(f"   Directory: {geometric_pred_dir}")
+        print(f"   Esegui prima: python run_inference.py")
+        print(f"   Seleziona dataset {dataset_id} e modello geometric")
         return False
 
     # Setup environment
@@ -590,10 +714,21 @@ def process_comparison(num_images=None):
     if num_images:
         pred_files = pred_files[:num_images]
 
-    print(f"\n📊 Processando confronto per {len(pred_files)} immagini...")
+    print(f"\n📊 Processando confronto per {len(pred_files)} immagini (Dataset {dataset_id})...")
 
     baseline_metrics = []
     geometric_metrics = []
+
+    # Trova il nome completo del dataset in nnUNet_raw
+    raw_dataset_name = None
+    for item in os.listdir(raw_dir) if os.path.exists(raw_dir) else []:
+        if os.path.isdir(os.path.join(raw_dir, item)) and item.startswith(f'Dataset{dataset_id:03d}_'):
+            raw_dataset_name = item
+            break
+    
+    if not raw_dataset_name:
+        print(f"❌ Dataset {dataset_id} non trovato in nnUNet_raw")
+        return False
 
     for idx, pred_file in enumerate(pred_files):
         case_id = pred_file.replace('.nii.gz', '')
@@ -610,7 +745,7 @@ def process_comparison(num_images=None):
         pred_geometric = load_nifti(pred_geometric_path)
 
         # Carica GT
-        gt_path = os.path.join(raw_dir, f'Dataset{DATASET_ID:03d}_Shapes', 'labelsTr', f'{case_id}.nii.gz')
+        gt_path = os.path.join(raw_dir, raw_dataset_name, 'labelsTr', f'{case_id}.nii.gz')
         if not os.path.exists(gt_path):
             print(f"⚠️  GT non trovato per {case_id}, skip")
             continue
@@ -618,7 +753,7 @@ def process_comparison(num_images=None):
         gt = load_nifti(gt_path)
 
         # Carica immagine originale
-        img_path = os.path.join(raw_dir, f'Dataset{DATASET_ID:03d}_Shapes', 'imagesTr', f'{case_id}_0000.nii.gz')
+        img_path = os.path.join(raw_dir, raw_dataset_name, 'imagesTr', f'{case_id}_0000.nii.gz')
         if not os.path.exists(img_path):
             print(f"⚠️  Immagine originale non trovata per {case_id}, skip")
             continue
@@ -658,11 +793,15 @@ def process_comparison(num_images=None):
         values_b = [m[metric_name] for m in baseline_metrics]
         aggregate_baseline[f'{metric_name}_mean'] = float(np.mean(values_b))
         aggregate_baseline[f'{metric_name}_std'] = float(np.std(values_b))
+        aggregate_baseline[f'{metric_name}_min'] = float(np.min(values_b))
+        aggregate_baseline[f'{metric_name}_max'] = float(np.max(values_b))
 
         # Geometric
         values_g = [m[metric_name] for m in geometric_metrics]
         aggregate_geometric[f'{metric_name}_mean'] = float(np.mean(values_g))
         aggregate_geometric[f'{metric_name}_std'] = float(np.std(values_g))
+        aggregate_geometric[f'{metric_name}_min'] = float(np.min(values_g))
+        aggregate_geometric[f'{metric_name}_max'] = float(np.max(values_g))
 
     # Crea grafico confronto metriche
     create_metrics_comparison_chart(aggregate_baseline, aggregate_geometric, output_dir)
@@ -702,25 +841,84 @@ def process_comparison(num_images=None):
             f.write(f"  Geometric: {geometric_mean:.4f} ± {aggregate_geometric[f'{metric_name}_std']:.4f}\n")
             f.write(f"  Migliore:  {better} ({improvement:+.1f}%)\n\n")
 
+    # Salva anche metrics_summary.txt in formato compatibile con baseline/geometric
+    metrics_summary_txt = os.path.join(output_dir, 'metrics_summary.txt')
+    with open(metrics_summary_txt, 'w') as f:
+        f.write("RIEPILOGO METRICHE - CONFRONTO BASELINE vs GEOMETRIC\n")
+        f.write("=" * 80 + "\n\n")
+        f.write(f"Numero immagini analizzate: {len(baseline_metrics)}\n\n")
+
+        f.write("BASELINE:\n")
+        f.write("-" * 80 + "\n")
+        for metric_name in ['dice', 'iou', 'compactness', 'solidity', 'eccentricity', 'hausdorff_distance', 'boundary_iou']:
+            mean_val = aggregate_baseline[f'{metric_name}_mean']
+            std_val = aggregate_baseline[f'{metric_name}_std']
+            min_val = aggregate_baseline.get(f'{metric_name}_min', 0)
+            max_val = aggregate_baseline.get(f'{metric_name}_max', 0)
+            f.write(f"{metric_name.upper():20s}: {mean_val:.4f} ± {std_val:.4f}  (min: {min_val:.4f}, max: {max_val:.4f})\n")
+
+        f.write("\n\nGEOMETRIC:\n")
+        f.write("-" * 80 + "\n")
+        for metric_name in ['dice', 'iou', 'compactness', 'solidity', 'eccentricity', 'hausdorff_distance', 'boundary_iou']:
+            mean_val = aggregate_geometric[f'{metric_name}_mean']
+            std_val = aggregate_geometric[f'{metric_name}_std']
+            min_val = aggregate_geometric.get(f'{metric_name}_min', 0)
+            max_val = aggregate_geometric.get(f'{metric_name}_max', 0)
+            f.write(f"{metric_name.upper():20s}: {mean_val:.4f} ± {std_val:.4f}  (min: {min_val:.4f}, max: {max_val:.4f})\n")
+
+        f.write("\n\nMIGLIORAMENTI GEOMETRIC vs BASELINE:\n")
+        f.write("-" * 80 + "\n")
+        for metric_name in ['dice', 'iou', 'compactness', 'solidity', 'eccentricity', 'hausdorff_distance', 'boundary_iou']:
+            baseline_mean = aggregate_baseline[f'{metric_name}_mean']
+            geometric_mean = aggregate_geometric[f'{metric_name}_mean']
+
+            if metric_name in ['hausdorff_distance', 'eccentricity']:
+                improvement = ((baseline_mean - geometric_mean) / baseline_mean) * 100 if baseline_mean != 0 else 0
+                better = 'Geometric' if geometric_mean < baseline_mean else 'Baseline'
+            else:
+                improvement = ((geometric_mean - baseline_mean) / baseline_mean) * 100 if baseline_mean != 0 else 0
+                better = 'Geometric' if geometric_mean > baseline_mean else 'Baseline'
+
+            f.write(f"{metric_name.upper():20s}: {improvement:+6.2f}%  (migliore: {better})\n")
+
     print(f"\n✅ Confronto completato!")
     print(f"   Visualizzazioni:     {visualizations_dir}")
     print(f"   Grafico confronto:   {os.path.join(output_dir, 'metrics_comparison_chart.png')}")
     print(f"   Metriche JSON:       {comparison_file}")
     print(f"   Metriche TXT:        {comparison_txt}")
+    print(f"   Metrics Summary:     {metrics_summary_txt}")
 
     return True
 
 
 def main():
     """Main con menu interattivo."""
-    print("=" * 80)
-    print("TEST MODELLI nnU-Net - Baseline vs Geometric")
-    print("=" * 80)
-    print("\nPREREQUISITO: Esegui prima run_inference.py per generare le predizioni!\n")
+    print_header("TEST MODELLI nnU-Net - Baseline vs Geometric")
+    
+    print("PREREQUISITO: Esegui prima run_inference.py per generare le predizioni!\n")
+
+    # Setup environment
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    os.environ['nnUNet_raw'] = os.path.join(base_dir, 'nnUNet_raw')
+    os.environ['nnUNet_preprocessed'] = os.path.join(base_dir, 'nnUNet_preprocessed')
+    os.environ['nnUNet_results'] = os.path.join(base_dir, 'nnUNet_results')
+
+    # Scelta dataset
+    dataset_choice = get_dataset_choice()
+    if dataset_choice is None:
+        print("\n❌ Impossibile continuare senza un dataset valido.")
+        return 1
+    dataset_id, dataset_name = dataset_choice
+
+    # Ottieni nomi cartelle output in base al dataset
+    output_dirs = get_output_dirs(dataset_id)
+
+    # Scelta modello
+    print_header("SCELTA MODELLO")
     print("Che rete vuoi analizzare? Premi:")
-    print("  1 - Baseline       (rete normale)")
-    print("  2 - Geometric      (rete con loss geometrica)")
-    print("  3 - Confronto      (confronta entrambe le reti)")
+    print_option(1, "Baseline", "Rete normale")
+    print_option(2, "Geometric", "Rete con loss geometrica")
+    print_option(3, "Confronto", "Confronta entrambe le reti")
     print()
 
     mode_input = input("Scelta (1/2/3): ").strip()
@@ -734,23 +932,37 @@ def main():
     num_images_input = input("Numero (invio per tutte): ").strip()
     num_images = int(num_images_input) if num_images_input else None
 
+    # Mostra riepilogo
+    print_header("RIEPILOGO CONFIGURAZIONE")
+    print(f"  Dataset:       {dataset_id} ({dataset_name})")
+    print(f"  Modalità:      ", end="")
+    if mode_input == '1':
+        print("Baseline")
+    elif mode_input == '2':
+        print("Geometric")
+    else:
+        print("Confronto")
+    print(f"  Numero immagini: {num_images if num_images else 'Tutte'}")
+    print(f"  Output:         {output_dirs['baseline'] if mode_input == '1' else output_dirs['geometric'] if mode_input == '2' else output_dirs['confronto']}")
+    print()
+
     print("\n" + "=" * 80)
 
     # Processa in base alla scelta
     if mode_input == '1':
         print("ANALISI BASELINE")
         print("=" * 80)
-        process_single_model('baseline', OUTPUT_DIRS['baseline'], num_images)
+        process_single_model('baseline', dataset_id, dataset_name, output_dirs['baseline'], num_images)
 
     elif mode_input == '2':
         print("ANALISI GEOMETRIC")
         print("=" * 80)
-        process_single_model('geometric', OUTPUT_DIRS['geometric'], num_images)
+        process_single_model('geometric', dataset_id, dataset_name, output_dirs['geometric'], num_images)
 
     elif mode_input == '3':
         print("ANALISI CONFRONTO")
         print("=" * 80)
-        process_comparison(num_images)
+        process_comparison(dataset_id, dataset_name, output_dirs['confronto'], num_images)
 
     print("\n" + "=" * 80)
     print("✅ ANALISI COMPLETATA!")
