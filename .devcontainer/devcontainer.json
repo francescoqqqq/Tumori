@@ -1,0 +1,26 @@
+{
+    "name": "nnU-Net Satellite Segmentation",
+    "build": {
+        "dockerfile": "Dockerfile"
+    },
+    "remoteUser": "root",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
+    "workspaceFolder": "/workspace",
+    "postCreateCommand": "ln -sf $(find /usr/lib/x86_64-linux-gnu-host -name 'libnvidia-ml.so.*' | head -1) /usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1 && ln -sf $(find /usr/lib/x86_64-linux-gnu-host -name 'libcuda.so.*[0-9]' | head -1) /usr/lib/x86_64-linux-gnu/libcuda.so.1 && ldconfig",
+    "containerEnv": {
+        "nnUNet_raw": "/workspace/nnUNet_raw",
+        "nnUNet_preprocessed": "/workspace/nnUNet_preprocessed",
+        "nnUNet_results": "/workspace/nnUNet_results"
+    },
+    "runArgs": [
+        "--device",
+        "nvidia.com/gpu=all"
+    ],
+    "customizations": {
+        "vscode": {
+            "settings": {
+                "dev.containers.copyGitConfig": false
+            }
+        }
+    }
+}

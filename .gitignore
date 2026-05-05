@@ -43,9 +43,6 @@ ENV/
 *.swp
 *.swo
 
-# ===== Dev Container =====
-.devcontainer/
-
 # ===== OS =====
 .DS_Store
 Thumbs.db
