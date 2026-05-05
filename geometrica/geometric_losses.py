@@ -1,5 +1,5 @@
 """
-VERSIONE DIFFERENZIABILE COMPLETA con PROTEZIONI ANTI-NaN V2.4
+VERSIONE DIFFERENZIABILE COMPLETA con PROTEZIONI ANTI-NaN V2.6
 
 Loss geometriche vettorizzate e sicure per training stabile.
 Implementazione fully differentiable che opera sull'intero batch
@@ -13,22 +13,81 @@ Protezioni V2.4 (FIX GRADIENTI ESPLOSIVI):
 - Gestione predizioni quasi vuote (ritorna 0.0 con computational graph)
 - Controlli finali NaN in ogni funzione loss
 
+Miglioramenti V2.5 (FIX ECCENTRICITY):
+- Aspect loss ora ottimizza direttamente l'eccentricità al quadrato
+- Formula: L = (1 - lambda_min/lambda_max)² invece di |AR-1|/(AR+1)
+- Penalizzazione quadratica più aggressiva sulle deviazioni dalla circolarità
+- Pesi aspect aumentati: 0.03 totale (era 0.015 in V2.4)
+
 MOTIVAZIONE V2.4:
 Il gradiente di sqrt(x) è 1/(2*sqrt(x)):
 - sqrt(1e-4) → gradiente = 50 (ESPLOSIONE!)
 - sqrt(1e-2) → gradiente = 5 (STABILE)
 
-Con predizioni incerte (epoca 5-20), ~28% dei pixel hanno
-grad_mag_squared < 1e-2, causando esplosione gradienti nel backward.
+MOTIVAZIONE V2.5:
+La vecchia formula |AR-1|/(AR+1) era troppo debole:
+- Leggera ellisse (AR=1.1): loss = 0.048, ma e = 0.417!
+- Nuova formula (1-ratio)²: loss = 0.01 per ratio=0.9
+- Penalizzazione quadratica allineata meglio con eccentricity
+
+Miglioramenti V2.6 (GRADIENT FLOW + EFFICIENZA):
+- Boundary loss: maschera soft (pred_soft) invece di soglia hard (>0.1)
+  → gradienti fluiscono per tutti i pixel, non solo quelli sopra threshold
+- Compactness + Aspect loss: sqrt(clamp(x,min=0)+1e-2) elimina la zona morta
+  del gradiente che clamp(min=1e-2)+sqrt creava per x in [0,1e-2]
+  → bound massimo gradiente invariato (~5), ma mai zero
+- Aspect loss: lazy cache per coordinate grids (y_coords, x_coords)
+  → tensori GPU non ricreati a ogni forward pass se H,W,device,dtype non cambiano
+
+Miglioramenti V2.7 (AREA RAMP):
+- __call__: area ramp morbida (0→1 tra 50px e 300px) invece di hard threshold.
+  Impedisce alla geometric loss di combattere Dice+CE quando la predizione
+  è ancora piccola/incorretta (fascia 50–300px).
+  La zona morta assoluta <50px è mantenuta come safety net nelle singole loss.
+
+Miglioramenti V2.8 (CIRCLE TEMPLATE LOSS):
+- Sostituisce l'eccentricity loss (momenti di inerzia) con la Circle Template Loss.
+  
+  PROBLEMA CON V2.5 (momenti di inerzia):
+  La formula (1 - lambda_min/lambda_max)² ha gradiente ~0 per predizioni già
+  quasi circolari (ratio ≈ 0.95 → loss = 0.0025, gradiente quasi zero).
+  Nella pratica la loss non influenza il training su target già circolari.
+
+  SOLUZIONE (Circle Template Loss):
+  1. Calcola il "cerchio atteso": centroide e r = sqrt(area/π) (stop gradient)
+  2. Costruisce template = sigmoid(k · (r − dist_from_center))
+  3. Loss = MSE(pred_soft, template)
+  
+  Vantaggi:
+  - Gradienti direzionali: rimuove "angoli" dell'ellisse, riempie i "poli"
+  - Scala loss ~50-100× più grande per predizioni ellittiche → gradiente effettivo
+  - Per cerchio perfetto: loss ≈ 0 (gradienti solo al bordo, già ottimi)
+  - Funziona anche su predizioni piccole/sbagliate (con area ramp)
 
 Author: Francesco + Claude
-Date: 2025-12-13
-Version: 2.4 (fix gradienti esplosivi in sqrt)
+Date: 2026-04-29
+Version: 2.8 (Circle Template Loss)
 """
 
 import torch  # pyright: ignore[reportMissingImports]
 import torch.nn.functional as F  # pyright: ignore[reportMissingImports]
 import math
+
+# Importa configurazione centralizzata
+# _GEOMETRIC_CONFIG_LOADED: True se il file è stato trovato, False se si usano valori fallback
+_GEOMETRIC_CONFIG_LOADED = False
+try:
+    from geometric_config import (
+        WEIGHT_COMPACTNESS, WEIGHT_ECCENTRICITY,
+        WEIGHT_BOUNDARY, MIN_AREA_THRESHOLD
+    )
+    _GEOMETRIC_CONFIG_LOADED = True
+except ImportError:
+    # Fallback se geometric_config non è disponibile
+    WEIGHT_COMPACTNESS = 0.01
+    WEIGHT_ECCENTRICITY = 0.03
+    WEIGHT_BOUNDARY = 0.005
+    MIN_AREA_THRESHOLD = 50.0
 
 
 class DifferentiableGeometricLossesV2:
@@ -40,22 +99,29 @@ class DifferentiableGeometricLossesV2:
     """
 
     def __init__(self,
-                 weight_compactness: float = 0.01,
-                 weight_boundary: float = 0.01,
-                 weight_aspect: float = 0.005):
+                 weight_compactness: float = WEIGHT_COMPACTNESS,
+                 weight_boundary: float = WEIGHT_BOUNDARY,
+                 weight_eccentricity: float = WEIGHT_ECCENTRICITY):
         """
-        Versione semplificata con solo 3 loss differenziabili:
+        3 loss differenziabili:
         - Compactness (area vs perimeter)
         - Boundary smoothness (second derivatives)
-        - Aspect ratio (momenti di inerzia)
+        - Circle Template (V2.8): penalizza deviazione dal cerchio atteso
+          [sostituisce la vecchia eccentricity loss a momenti di inerzia]
 
         NOTA: Pesi ridotti 10x rispetto a versione precedente per stabilità.
         """
         self.weight_compactness = weight_compactness
         self.weight_boundary = weight_boundary
-        self.weight_aspect = weight_aspect
+        self.weight_eccentricity = weight_eccentricity
 
         self.last_losses = {}
+
+        # Cache per le griglie di coordinate.
+        # Chiave: (H, W, device, dtype) — così si ricalcolano solo se cambia dimensione o device.
+        # Usata sia da _vectorized_eccentricity_loss che da _vectorized_circle_template_loss.
+        # Evita di ricreare tensori su GPU a ogni forward pass (miglioramento efficienza).
+        self._coord_cache: dict = {}
 
     def __call__(self, pred_softmax: torch.Tensor) -> torch.Tensor:
         """
@@ -71,7 +137,7 @@ class DifferentiableGeometricLossesV2:
         # SAFETY CHECK: Verifica che pred_soft abbia abbastanza "massa" prima di calcolare loss
         # Se la predizione è quasi tutta background, i calcoli geometrici non hanno senso
         area_per_batch = pred_soft.sum(dim=(1, 2))  # [B]
-        min_area_threshold = 50.0  # Area minima per considerare la predizione valida
+        min_area_threshold = MIN_AREA_THRESHOLD  # Area minima per considerare la predizione valida
         
         # Se tutti i batch hanno area troppo piccola, ritorna 0.0 mantenendo computational graph
         if (area_per_batch < min_area_threshold).all():
@@ -81,7 +147,8 @@ class DifferentiableGeometricLossesV2:
         # Se area è troppo piccola, le loss ritornano 0.0 mantenendo computational graph
         loss_compact = self._vectorized_compactness_loss(pred_soft)
         loss_bound = self._vectorized_boundary_loss(pred_soft)
-        loss_aspect = self._vectorized_aspect_loss(pred_soft)
+        # V2.8: Circle Template Loss invece di _vectorized_eccentricity_loss
+        loss_eccentricity = self._vectorized_circle_template_loss(pred_soft)
 
         # CHECK NaN: Se una loss è NaN, la setta a 0 MANTENENDO computational graph
         # IMPORTANTE: Usiamo pred_soft.sum() * 0.0 invece di torch.tensor(0.0)
@@ -90,20 +157,37 @@ class DifferentiableGeometricLossesV2:
             loss_compact = pred_soft.sum() * 0.0  # Mantiene computational graph!
         if torch.isnan(loss_bound) or torch.isinf(loss_bound):
             loss_bound = pred_soft.sum() * 0.0
-        if torch.isnan(loss_aspect) or torch.isinf(loss_aspect):
-            loss_aspect = pred_soft.sum() * 0.0
+        if torch.isnan(loss_eccentricity) or torch.isinf(loss_eccentricity):
+            loss_eccentricity = pred_soft.sum() * 0.0
 
         # Logging
         self.last_losses = {
             'compactness': loss_compact.item(),
             'boundary': loss_bound.item(),
-            'aspect': loss_aspect.item()
+            'eccentricity': loss_eccentricity.item()  # ora = circle template loss
         }
 
-        # Combinazione
+        # Area ramp: scala la loss combinata in base all'area media del batch.
+        #
+        # PROBLEMA che risolve: le singole loss restituiscono 0.0 quando
+        # area < MIN_AREA_THRESHOLD (50px) — zona morta dove la geometric loss
+        # non contribuisce e non aiuta a far crescere la predizione.
+        # Ma nella fascia intermedia (50–300px) la geometric loss è attiva e
+        # può combattere il Dice gradient che vuole espandere la predizione.
+        # La ramp crea una transizione morbida:
+        #   area <  50px: area_scale ≈ 0  (geometric loss quasi silenziosa)
+        #   area = 150px: area_scale = 0.5  (peso dimezzato)
+        #   area > 300px: area_scale = 1.0  (peso pieno)
+        #
+        # In questo modo la geometric loss non si oppone mai alla crescita della
+        # predizione quando il cerchio non è ancora stato trovato correttamente.
+        TARGET_AREA = 6.0 * min_area_threshold  # 300px con default MIN_AREA=50
+        area_scale = (area_per_batch / TARGET_AREA).clamp(0.0, 1.0).mean()
+
+        # Combinazione con area ramp
         total = (self.weight_compactness * loss_compact +
                 self.weight_boundary * loss_bound +
-                self.weight_aspect * loss_aspect)
+                self.weight_eccentricity * loss_eccentricity) * area_scale
 
         # CHECK finale NaN - mantiene computational graph
         if torch.isnan(total) or torch.isinf(total):
@@ -156,14 +240,14 @@ class DifferentiableGeometricLossesV2:
         grad_y = F.conv2d(pred_4d, sobel_y, padding=1)
 
         # Magnitudine = bordo soft
-        # PROTEZIONE V2.4: Clamp AGGRESSIVO (min=1e-2) per evitare gradienti esplosivi
-        # Il gradiente di sqrt(x) è 1/(2*sqrt(x)):
-        #   - V2.3: sqrt(1e-4) → gradiente = 50 (ESPLOSIONE!)
-        #   - V2.4: sqrt(1e-2) → gradiente = 5 (STABILE!)
-        # Con predizioni incerte, ~28% pixel hanno grad_mag_squared < 1e-2
+        # V2.6: sqrt(clamp(x, min=0) + 1e-2) invece di clamp(x, min=1e-2) + sqrt(x).
+        # La differenza è cruciale:
+        #   - Vecchio (V2.4): clamp crea zona morta [0, 1e-2] dove gradiente = 0
+        #   - Nuovo (V2.6):   gradiente = 1/(2*sqrt(x+1e-2)), sempre non-zero
+        #                     Gradiente max a x=0: 1/(2*sqrt(1e-2)) ≈ 5  (stesso bound di V2.4)
+        # Il clamp(min=0) prima dell'epsilon previene valori negativi da errori numerici.
         grad_mag_squared = grad_x**2 + grad_y**2
-        grad_mag_squared = torch.clamp(grad_mag_squared, min=1e-2)  # V2.4: min=1e-2 (era 1e-4)
-        grad_mag = torch.sqrt(grad_mag_squared)
+        grad_mag = torch.sqrt(torch.clamp(grad_mag_squared, min=0.0) + 1e-2)
 
         # Soft perimeter
         perimeter = grad_mag.sum(dim=(1, 2, 3))  # [B]
@@ -233,8 +317,11 @@ class DifferentiableGeometricLossesV2:
         # PROTEZIONE: Clampa lap_response prima di usarlo
         lap_response = torch.clamp(lap_response, min=-100.0, max=100.0)
 
-        # Penalizza dove la maschera è attiva
-        mask_active = (pred_soft > 0.1).float()
+        # Maschera soft: usa pred_soft direttamente come peso invece di una soglia netta.
+        # Con soglia hard (>0.1) il gradiente era zero per tutti i pixel sotto threshold.
+        # Con pred_soft il gradiente fluisce ovunque, pesato per la confidenza della predizione.
+        # Il Laplacian individua già i bordi da solo, quindi non serve un taglio netto.
+        mask_active = pred_soft
 
         # Weighted Laplacian
         lap_weighted = lap_response * mask_active
@@ -264,9 +351,9 @@ class DifferentiableGeometricLossesV2:
 
         return loss
 
-    def _vectorized_aspect_loss(self, pred_soft: torch.Tensor) -> torch.Tensor:
+    def _vectorized_eccentricity_loss(self, pred_soft: torch.Tensor) -> torch.Tensor:
         """
-        Aspect ratio usando momenti di inerzia (fully differentiable).
+        Eccentricity loss usando momenti di inerzia (fully differentiable).
 
         Penalizza forme allungate (ellissi vs cerchi).
 
@@ -289,9 +376,17 @@ class DifferentiableGeometricLossesV2:
         if not valid_mask.any():
             return pred_soft.sum() * 0.0
 
-        # Coordinate grids
-        y_coords = torch.arange(H, dtype=pred_soft.dtype, device=pred_soft.device).view(1, H, 1).expand(B, H, W)
-        x_coords = torch.arange(W, dtype=pred_soft.dtype, device=pred_soft.device).view(1, 1, W).expand(B, H, W)
+        # Coordinate grids con lazy cache: ricalcolate solo se H, W, device o dtype cambiano.
+        # expand() crea una view (non copia memoria), quindi il costo in cache è minimo.
+        cache_key = (H, W, pred_soft.device, pred_soft.dtype)
+        if cache_key not in self._coord_cache:
+            y_base = torch.arange(H, dtype=pred_soft.dtype, device=pred_soft.device)
+            x_base = torch.arange(W, dtype=pred_soft.dtype, device=pred_soft.device)
+            self._coord_cache[cache_key] = (
+                y_base.view(1, H, 1).expand(B, H, W),
+                x_base.view(1, 1, W).expand(B, H, W),
+            )
+        y_coords, x_coords = self._coord_cache[cache_key]
 
         # Soft area per batch (con protezione)
         area = pred_soft.sum(dim=(1, 2), keepdim=True) + 1e-2  # [B, 1, 1] - epsilon più grande
@@ -331,12 +426,13 @@ class DifferentiableGeometricLossesV2:
         trace = torch.clamp(trace, min=1e-2, max=1e6)
         det = torch.clamp(det, min=-1e6, max=1e6)
 
-        # Calcola sqrt_term con protezione più aggressiva
-        # PROTEZIONE V2.4: Clamp AGGRESSIVO (min=1e-2) per evitare gradienti esplosivi
-        # Come in compactness_loss: sqrt(1e-2) → gradiente = 5 (STABILE)
+        # V2.6: sqrt(clamp(discriminant, min=0) + 1e-2) elimina la zona morta del gradiente.
+        # Il discriminant può essere negativamente leggermente negativo per errori numerici
+        # (es. det leggermente sovrastimato): il clamp(min=0) lo gestisce prima dell'epsilon.
+        # Gradiente max: 1/(2*sqrt(1e-2)) ≈ 5, stesso bound di stabilità di V2.4.
         discriminant = trace**2 - 4*det
-        discriminant = torch.clamp(discriminant, min=1e-2, max=1e12)  # V2.4: min=1e-2 (era 1e-4)
-        sqrt_term = torch.sqrt(discriminant)
+        discriminant = torch.clamp(discriminant, max=1e12)  # solo upper bound, lower gestito da epsilon
+        sqrt_term = torch.sqrt(torch.clamp(discriminant, min=0.0) + 1e-2)
         
         lambda1 = (trace + sqrt_term) / 2 + 1e-2  # Maggiore - epsilon più grande
         lambda2 = (trace - sqrt_term) / 2 + 1e-2  # Minore - epsilon più grande
@@ -347,14 +443,23 @@ class DifferentiableGeometricLossesV2:
         # Assicura lambda2 <= lambda1 (usa min per forzare upper bound)
         lambda2 = torch.min(lambda2, lambda1)
 
-        # Aspect ratio
-        aspect_ratio = lambda1 / (lambda2 + 1e-6)  # Aggiungi epsilon al denominatore
+        # ASPECT LOSS V2.5: Ottimizza direttamente l'eccentricità al quadrato
+        # Formula eccentricity: e = sqrt(1 - (lambda_min/lambda_max)²)
+        # Per penalizzare di più, usiamo: L = (1 - lambda_min/lambda_max)²
+        # Questo è equivalente a e² ma più stabile numericamente (no sqrt)
 
-        # PROTEZIONE: Clampa aspect_ratio per evitare valori estremi
-        aspect_ratio = torch.clamp(aspect_ratio, min=0.1, max=10.0)
+        # Calcola rapporto asse minore/maggiore (inverso di aspect ratio)
+        ratio_min_max = lambda2 / (lambda1 + 1e-6)  # [0, 1], 1 = cerchio perfetto
 
-        # Loss: penalizza ratio lontano da 1 (cerchio perfetto = 1)
-        loss_per_batch = torch.abs(aspect_ratio - 1.0) / (aspect_ratio + 1.0 + 1e-6)  # Aggiungi epsilon anche qui
+        # PROTEZIONE: Clampa tra 0 e 1
+        ratio_min_max = torch.clamp(ratio_min_max, min=0.0, max=1.0)
+
+        # Loss: (1 - ratio)² penalizza quadraticamente le deviazioni dalla circolarità
+        # - Cerchio perfetto: ratio=1 → loss=0
+        # - Leggera ellisse: ratio=0.9 → loss=0.01 (era 0.048 con formula vecchia)
+        # - Ellisse media: ratio=0.8 → loss=0.04 (era 0.111)
+        # - Ellisse forte: ratio=0.5 → loss=0.25 (era 0.333)
+        loss_per_batch = (1.0 - ratio_min_max) ** 2
         
         # Media solo sui batch validi
         if valid_mask.all():
@@ -368,6 +473,96 @@ class DifferentiableGeometricLossesV2:
 
         return loss
 
+    def _vectorized_circle_template_loss(self, pred_soft: torch.Tensor) -> torch.Tensor:
+        """
+        Circle Template Loss (V2.8): penalizza la deviazione dalla forma circolare ideale.
+
+        APPROCCIO:
+          1. Stop-gradient su centroide e raggio: calcola il "cerchio atteso" dalla
+             predizione corrente (stesso centroide, r = sqrt(area/π)) senza propagare
+             gradienti attraverso queste quantità.
+          2. Costruisce template circolare: sigmoid(k · (r − dist_from_center))
+             con k=5 → bordo quasi-binario, coerente con predizioni confident.
+          3. Loss = MSE(pred_soft, template):
+             - Pixel dentro l'ellisse ma fuori dal cerchio → diff > 0 → riduce pred  (rimuove angoli)
+             - Pixel fuori dall'ellisse ma dentro il cerchio → diff < 0 → aumenta pred (riempie poli)
+             - Pixel dentro il cerchio e dentro la predizione → diff ≈ 0 → nessun push
+
+        VANTAGGIO vs eccentricity loss (momenti di inerzia):
+          - La vecchia formula (1-ratio)² ha gradiente ~0.1 × piccolo per ratio≈0.95
+            → la loss è praticamente inattiva su predizioni quasi-circolari.
+          - Circle Template Loss ha |diff| ≈ 0.5–1.0 sui pixel "fuori posto"
+            → gradienti 50-100× più grandi e direzionalmente corretti.
+
+        Args:
+            pred_soft: [B, H, W] probabilità soft (canale foreground)
+
+        Returns:
+            Loss scalare differenziabile (0.0 se NaN o area < threshold)
+        """
+        B, H, W = pred_soft.shape
+
+        area_check = pred_soft.sum(dim=(1, 2))  # [B]
+        min_area_threshold = MIN_AREA_THRESHOLD
+        valid_mask = area_check >= min_area_threshold  # [B] boolean
+
+        if not valid_mask.any():
+            return pred_soft.sum() * 0.0
+
+        # Lazy cache per griglie coordinate (condivisa con eccentricity)
+        cache_key = (H, W, pred_soft.device, pred_soft.dtype)
+        if cache_key not in self._coord_cache:
+            y_base = torch.arange(H, dtype=pred_soft.dtype, device=pred_soft.device)
+            x_base = torch.arange(W, dtype=pred_soft.dtype, device=pred_soft.device)
+            self._coord_cache[cache_key] = (
+                y_base.view(1, H, 1).expand(B, H, W),
+                x_base.view(1, 1, W).expand(B, H, W),
+            )
+        y_coords, x_coords = self._coord_cache[cache_key]
+
+        # Stop gradient: centroide e raggio sono il "target" fisso, non si aggiornano
+        # attraverso il template — solo pred_soft riceve gradiente via MSE.
+        with torch.no_grad():
+            area = area_check.clamp(min=min_area_threshold)           # [B]
+            cx = (pred_soft * x_coords).sum(dim=(1, 2)) / area        # [B]
+            cy = (pred_soft * y_coords).sum(dim=(1, 2)) / area        # [B]
+            r  = torch.sqrt(area / math.pi).clamp(min=1.0, max=max(H, W) / 2.0)
+            cx = cx.view(B, 1, 1)
+            cy = cy.view(B, 1, 1)
+            r  = r.view(B, 1, 1)
+
+        # Distanza euclidea dal centroide (epsilon per stabilità numerica)
+        dx   = x_coords - cx                                          # [B, H, W]
+        dy   = y_coords - cy
+        dist = torch.sqrt(dx**2 + dy**2 + 1e-2)                      # [B, H, W]
+
+        # Template circolare con bordo netto (k=5 ≈ bordo quasi-binario)
+        # sigmoid(k*(r-dist)): ≈1 dentro il cerchio, ≈0 fuori
+        TEMPLATE_SHARPNESS = 5.0
+        soft_circle = torch.sigmoid(TEMPLATE_SHARPNESS * (r - dist)) # [B, H, W]
+
+        # MSE tra predizione e template normalizzata per area del template.
+        #
+        # PERCHÉ: mediare su tutti i pixel H*W (512×512=262144) diluisce il segnale
+        # 50-100× perché il cerchio occupa solo il 3-8% dell'immagine.
+        # Normalizzare per l'area del template (∑soft_circle) concentra la loss
+        # sui pixel rilevanti e rende il peso scale-invariante alla dimensione del cerchio.
+        # Con questa normalizzazione WEIGHT_ECCENTRICITY=0.05 produce un gradiente
+        # comparabile a WEIGHT_COMPACTNESS=0.03 (entrambi ~0.003-0.005 sul totale).
+        diff_sq = (pred_soft - soft_circle) ** 2                      # [B, H, W]
+        template_area = soft_circle.sum(dim=(1, 2)).clamp(min=1.0)    # [B]
+        loss_per_batch = diff_sq.sum(dim=(1, 2)) / template_area      # [B]
+
+        if valid_mask.all():
+            loss = loss_per_batch.mean()
+        else:
+            loss = loss_per_batch[valid_mask].mean() if valid_mask.any() else pred_soft.sum() * 0.0
+
+        if torch.isnan(loss) or torch.isinf(loss):
+            return pred_soft.sum() * 0.0
+
+        return loss
+
     def get_last_losses(self) -> dict:
         """Ritorna componenti loss."""
         return self.last_losses.copy()
@@ -375,44 +570,32 @@ class DifferentiableGeometricLossesV2:
 
 class GeometricLosses:
     """
-    Wrapper per DifferentiableGeometricLossesV2 per compatibilità con trainer.
+    Interfaccia principale per le loss geometriche del trainer.
 
-    Mappa i parametri del trainer (weight_solidity, weight_eccentricity)
-    alla versione V2 semplificata (weight_aspect).
+    3 termini: compactness, boundary, eccentricity.
     """
 
     def __init__(self,
-                 weight_compactness: float = 0.01,
-                 weight_solidity: float = 0.01,
-                 weight_eccentricity: float = 0.005,
-                 weight_boundary: float = 0.005,
+                 weight_compactness: float = WEIGHT_COMPACTNESS,
+                 weight_eccentricity: float = WEIGHT_ECCENTRICITY,
+                 weight_boundary: float = WEIGHT_BOUNDARY,
                  min_area: int = 10):
         """
         Args:
-            weight_compactness: Peso per compactness loss
-            weight_solidity: Peso per solidity (non usato in V2, mappato ad aspect)
-            weight_eccentricity: Peso per eccentricity (non usato in V2, mappato ad aspect)
+            weight_compactness: Peso per compactness loss (area vs perimetro²)
+            weight_eccentricity: Peso per eccentricity loss (momenti di inerzia)
             weight_boundary: Peso per boundary smoothness loss
-            min_area: Area minima (non usato in V2, mantenuto per compatibilità)
-
-        NOTA: Pesi di default ridotti 10x per stabilità training.
+            min_area: Area minima (mantenuto per compatibilità)
         """
-        # Salva tutti i parametri per compatibilità con trainer
         self.weight_compactness = weight_compactness
-        self.weight_solidity = weight_solidity
         self.weight_eccentricity = weight_eccentricity
         self.weight_boundary = weight_boundary
         self.min_area = min_area
 
-        # Combina solidity + eccentricity in aspect (V2 semplificata)
-        # Aspect ratio copre sia solidity (convessità) che eccentricity (ellitticità)
-        weight_aspect = weight_solidity + weight_eccentricity
-
-        # Inizializza la classe V2 differenziabile con protezioni anti-NaN
         self._v2_loss = DifferentiableGeometricLossesV2(
             weight_compactness=weight_compactness,
             weight_boundary=weight_boundary,
-            weight_aspect=weight_aspect
+            weight_eccentricity=weight_eccentricity
         )
 
         self.last_losses = {}
@@ -430,15 +613,11 @@ class GeometricLosses:
         # Calcola loss usando V2
         loss = self._v2_loss(pred_softmax)
 
-        # Mappa i last_losses per compatibilità
         v2_losses = self._v2_loss.get_last_losses()
         self.last_losses = {
             'compactness': v2_losses.get('compactness', 0.0),
             'boundary': v2_losses.get('boundary', 0.0),
-            'aspect': v2_losses.get('aspect', 0.0),
-            # Per compatibilità, mappa aspect a solidity/eccentricity
-            'solidity': v2_losses.get('aspect', 0.0) * (self.weight_solidity / (self.weight_solidity + self.weight_eccentricity + 1e-8)),
-            'eccentricity': v2_losses.get('aspect', 0.0) * (self.weight_eccentricity / (self.weight_solidity + self.weight_eccentricity + 1e-8))
+            'eccentricity': v2_losses.get('eccentricity', 0.0),
         }
 
         return loss
@@ -451,7 +630,7 @@ class GeometricLosses:
 # Test
 if __name__ == "__main__":
     print("=" * 80)
-    print("TEST: Differentiable Geometric Losses V2.4 (fix gradienti esplosivi)")
+    print("TEST: Differentiable Geometric Losses V2.8 (3 termini: compactness, boundary, circle_template)")
     print("=" * 80)
 
     # Crea batch fittizio - SIMULA TRAINING REALE
@@ -481,10 +660,9 @@ if __name__ == "__main__":
     # Test con GeometricLosses wrapper
     print("\n--- Test GeometricLosses wrapper ---")
     geom_loss_wrapper = GeometricLosses(
-        weight_compactness=0.01,
-        weight_solidity=0.01,
-        weight_eccentricity=0.005,
-        weight_boundary=0.005
+        weight_compactness=WEIGHT_COMPACTNESS,
+        weight_eccentricity=WEIGHT_ECCENTRICITY,
+        weight_boundary=WEIGHT_BOUNDARY
     )
     loss = geom_loss_wrapper(pred_softmax)
 

@@ -1,38 +1,59 @@
-# nnU-Net directories (too large for git)
+# ===== nnU-Net – dati pesanti (raw, preprocessed, modelli) =====
+# Si applica a qualsiasi sottocartella (clinico/, geometrica/, ecc.)
 nnUNet_raw/
 nnUNet_preprocessed/
 nnUNet_results/
 
-# Python cache
+# ===== geometrica – contenuto esperimenti (generato a runtime) =====
+# Dataset immagini generate
+geometrica/experiments/*/1_dataset/
+# Dati NIfTI e checkpoint modelli
+geometrica/experiments/*/2_nnunet_engine/
+# Predizioni PNG
+geometrica/experiments/*/3_predizioni/
+# Visualizzazioni per-immagine (centinaia di PNG, troppo pesanti)
+geometrica/experiments/*/4_confronto_finale/visualizations/
+# Log di esecuzione
+geometrica/experiments/*/logs/
+
+# File auto-generato da run_experiment.py a ogni run (deriva da config.py)
+geometrica/geometric_config.py
+
+# Vecchie cartelle pre-refactor (già eliminate, ignorate per sicurezza)
+geometrica/dataset_shapes/
+geometrica/dataset_shapes_one/
+geometrica/confronto_results_*/
+
+# ===== Python =====
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 .Python
 
-# Virtual environments
+# ===== Ambienti virtuali =====
 venv/
 env/
 ENV/
 
-# IDE
+# ===== IDE / editor =====
 .vscode/
 .idea/
+.claude/
 *.swp
 *.swo
 
-# Dev Container (local environment configuration)
+# ===== Dev Container =====
 .devcontainer/
 
-# OS
+# ===== OS =====
 .DS_Store
 Thumbs.db
 
-# Logs
+# ===== Log =====
 *.log
 training.log
 
-# Temporary files
+# ===== File temporanei =====
 *.tmp
 *.temp
-

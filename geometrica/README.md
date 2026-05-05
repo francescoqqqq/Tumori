@@ -1,22 +1,19 @@
 # Geometric Circle Segmentation with nnU-Net
 
-Progetto di segmentazione di cerchi utilizzando nnU-Net esteso con loss geometriche per migliorare la qualità della forma delle predizioni.
+Progetto di segmentazione di cerchi con [nnU-Net](https://github.com/MIC-DKFZ/nnUNet), esteso con **loss functions geometriche differenziabili** per migliorare la qualità della forma delle predizioni.
 
-**Autore:** Francesco + Claude
-**Ultima versione:** V2.2 (fix computational graph + safety checks)
-**Data aggiornamento:** 2025-12-10
+**Autore:** Francesco + Claude — **Versione:** 3.0
 
 ---
 
 ## Panoramica
 
-Questo progetto estende [nnU-Net](https://github.com/MIC-DKFZ/nnUNet) con **loss functions geometriche** per migliorare la segmentazione di cerchi, ottenendo:
+Il progetto confronta due architetture identiche:
 
-- Mantiene Dice Score elevato (≥0.985)
-- Migliora circolarità (compactness)
-- Riduce irregolarità (solidity)
-- Corregge forme ellittiche (eccentricity)
-- Smooth bordi (boundary IoU)
+- **Baseline** — ottimizza solo Dice + Cross-Entropy
+- **Geometrica** — aggiunge penalità differenziabili su compactness, eccentricità e smoothness del bordo
+
+L'obiettivo è verificare se le loss geometriche producono predizioni più circolari mantenendo un Dice Score elevato.
 
 ---
 
@@ -24,403 +21,200 @@ Questo progetto estende [nnU-Net](https://github.com/MIC-DKFZ/nnUNet) con **loss
 
 | File | Descrizione |
 |------|-------------|
-| **`train.py`** | ⭐ Script interattivo per training (usa questo!) |
-| **`geometric_losses.py`** | Loss geometriche differenziabili V2.2 con protezioni anti-NaN |
-| **`nnUNetTrainer250Epochs.py`** | Trainer baseline (rete normale) |
-| **`nnUNetTrainerGeometric.py`** | ⭐ Trainer con loss geometriche |
-| **`data_geom.py`** | Genera dataset sintetico con forme |
-| **`convert_to_nnunet.py`** | Converte dataset in formato nnU-Net |
-| **`run_inference.py`** | Esegue predizioni sui modelli trained |
-| **`test.py`** | ⭐ Analizza risultati e genera visualizzazioni |
+| `config.py` | ⭐ **Unico file da modificare** — parametri del run |
+| `run_experiment.py` | Pipeline completa automatica (Step 1–5) — non modificare |
+| `data_geom.py` | Genera dataset sintetico con cerchi e distrattori |
+| `geometric_losses.py` | Loss geometriche differenziabili V2.5 |
+| `nnUNetTrainerBaseline.py` | Trainer baseline (solo Dice + CE) |
+| `nnUNetTrainerGeometric.py` | Trainer con loss geometriche |
+| `metrics_utils.py` | Funzioni metriche e visualizzazioni (usato da pipeline e standalone) |
+| `test.py` | Analisi standalone risultati di un esperimento |
 
-### Documentazione
+### Documentazione tecnica (cartella `info/`)
 
-| File | Descrizione |
-|------|-------------|
-| **`README.md`** | Questo file - guida rapida |
-| **`GEOMETRIC_MODIFICATIONS.md`** | Documentazione dettagliata delle modifiche |
+| File | Contenuto |
+|------|-----------|
+| `GEOMETRIC_MODIFICATIONS.md` | Dettagli implementativi e formule |
+| `TEORIA_DIFFERENZIABILITA.md` | Spiegazione matematica della differenziabilità |
+| `run_exp_info.md` | Note sulla pipeline MLOps |
 
 ---
 
-## Quick Start - Training
+## Quick Start
 
-### 1. Prepara Dataset (se non l'hai già fatto)
+### 1. Modifica `config.py`
+
+```python
+FOLDER_NAME      = "esp01_identico_100img"  # cartella dentro experiments/
+AUTOMATIC        = "si"   # "si" = pipeline automatica | "no" = conferma step-by-step
+
+# --- Dataset ---
+IMG_SIZE         = 512
+NUM_IMAGES       = 100
+SPLIT_TEST_SIZE  = 0.2          # 20% riservato al test
+TARGET_MODE      = 1            # 1 = single-circle  |  2 = multi-circle
+COLOR_STYLE      = "identico"   # vedi tabella sotto
+CIRCLE_ALONE     = "no"         # "si" = distrattori non sovrapposti al cerchio
+
+# --- nnU-Net e Training ---
+DATASET_ID       = 501
+RETI_DA_ALLENARE = "entrambe"   # "baseline" | "geometrica" | "entrambe"
+EPOCHS           = 100
+BATCH_SIZE       = 8
+WARMUP_EPOCHS    = 15
+
+# Pesi loss geometrica
+WEIGHT_COMPACTNESS  = 0.01
+WEIGHT_ECCENTRICITY = 0.03
+WEIGHT_BOUNDARY     = 0.005
+```
+
+### 2. Avvia la pipeline
 
 ```bash
 cd /workspace/geometrica
-
-# Genera dataset (500 immagini con forme)
-python data_geom.py
-
-# Converti in formato nnU-Net
-python convert_to_nnunet.py
-
-# Preprocessing nnU-Net
-nnUNetv2_plan_and_preprocess -d 501
+python run_experiment.py
 ```
 
-### 2. Training Interattivo (METODO RACCOMANDATO)
+La pipeline esegue automaticamente cinque step:
 
-```bash
-python train.py
-```
-
-Lo script ti chiederà:
-1. **Tipo di rete**: Baseline (1) o Geometric (2)
-2. **Numero epoche**: es. 100 (default)
-
-Esempio sessione:
-```
-============================================================
-SCELTA TIPO DI RETE
-============================================================
-
-  [1] Baseline (nnU-Net standard)
-      Solo Dice + Cross-Entropy loss
-  [2] Geometric (nnU-Net + Loss Geometriche)
-      Dice + CE + Compactness + Solidity + Eccentricity + Boundary
-
-Scegli il tipo di rete (1/2): 2
-
-============================================================
-NUMERO EPOCHE
-============================================================
-
-Epoche consigliate:
-  - Baseline:  100-250 epoche
-  - Geometric: 100 epoche (20 warm-up + 80 geometric)
-
-Quante epoche vuoi fare? [default: 100]: 100
-
-============================================================
-RIEPILOGO CONFIGURAZIONE
-============================================================
-
-  Tipo rete:     GEOMETRIC
-  Trainer:       nnUNetTrainerGeometric
-  Epoche:        100
-  Dataset:       501 (Shapes)
-  Configurazione: 2d
-  Fold:          0
-
-  Loss Geometriche:
-    - Compactness:    0.01
-    - Solidity:       0.01
-    - Eccentricity:   0.005
-    - Boundary:       0.005
-    - Warm-up:        20 epoche
-    - Con Geometric:  80 epoche
-
-Vuoi avviare il training? (s/n): s
-```
-
-### 3. Training Manuale (opzionale)
-
-Se preferisci usare i comandi diretti:
-
-**Baseline:**
-```bash
-nnUNetv2_train 501 2d 0 -tr nnUNetTrainer250Epochs
-```
-
-**Geometric:**
-```bash
-nnUNetv2_train 501 2d 0 -tr nnUNetTrainerGeometric
-```
-
-**NOTA:** Con training manuale, il numero di epoche è fisso nel trainer.
+| Step | Azione |
+|------|--------|
+| **1** | Genera dataset PNG, split train/test, salva `config_riassunto.yaml` |
+| **2** | Converte PNG → NIfTI, lancia `nnUNetv2_plan_and_preprocess` |
+| **3** | Installa i trainer custom, allena le reti scelte |
+| **4** | Inference sul test set, converte predizioni NIfTI → PNG |
+| **5** | Calcola metriche, genera visualizzazioni e grafico comparativo |
 
 ---
 
-## Analisi Risultati
+## Parametro `COLOR_STYLE` — Shortcut Learning
 
-### 1. Genera Predizioni (una volta sola)
+| Valore | Cerchi | Distrattori | Effetto |
+|--------|--------|-------------|---------|
+| `"differente"` | Gradiente radiale (più luminoso al centro) | Piatti, range `[180,240]` | Cerchi visivamente distinti → la rete può usare la texture come scorciatoia |
+| `"uguale"` | Piatti, range casuale `[180,240]` | Piatti, range `[180,240]` | Stessa gamma di colori → la rete **non può** distinguere per colore |
+| `"identico"` | Stesso colore esatto dei distrattori nell'immagine | Stesso colore del cerchio | Test massimo: la rete è costretta a ragionare **solo sulla forma** |
 
-```bash
-# Per entrambi i modelli
-python run_inference.py --both
+`CIRCLE_ALONE = "si"` (attivo solo con `COLOR_STYLE = "identico"`) impedisce la sovrapposizione spaziale tra distrattori e cerchio, rendendo il task ancora più puro dal punto di vista della forma.
 
-# O solo uno specifico
-python run_inference.py --baseline   # Solo baseline
-python run_inference.py --geometric  # Solo geometric
+---
+
+## Struttura Output
+
+Ogni esperimento è completamente isolato in `experiments/<FOLDER_NAME>/`:
+
+```
+experiments/
+└── esp01_identico_100img/
+    ├── config_riassunto.yaml       ← tutta la config dell'esperimento
+    ├── logs/                       ← log dettagliati per ogni step
+    ├── 1_dataset/
+    │   ├── train/  images/ + labels/
+    │   └── test/   images/ + labels/
+    ├── 2_nnunet_engine/
+    │   ├── nnUNet_raw/             ← NIfTI training
+    │   ├── nnUNet_preprocessed/
+    │   └── nnUNet_results/         ← checkpoint modelli
+    ├── 3_predizioni/
+    │   ├── baseline/               ← predizioni PNG rete baseline
+    │   ├── geometrica/             ← predizioni PNG rete geometrica
+    │   ├── baseline_nifti/
+    │   └── geometrica_nifti/
+    └── 4_confronto_finale/
+        ├── visualizations/         ← immagini confronto per ogni test case
+        ├── metrics_comparison.json
+        ├── metrics_comparison.txt
+        └── metrics_comparison_chart.png
 ```
 
-**Tempo:** ~5-10 minuti per 100 immagini
-**Output:** Predizioni salvate in `baseline_results/predictions/` e `geometric_results/predictions/`
+> Le variabili d'ambiente `nnUNet_*` vengono impostate all'inizio dello script,
+> prima di qualsiasi import di nnunetv2, puntando alle cartelle interne
+> dell'esperimento. Esperimenti multipli non si sovrascrivono mai.
 
-### 2. Analizza e Confronta
+---
+
+## Analisi Standalone
+
+Per riesaminare o rigenerare i risultati di un esperimento già completato:
 
 ```bash
 python test.py
 ```
 
-**Menu interattivo:**
-```
-Che rete vuoi analizzare? Premi:
-  1 - Baseline       (rete normale)
-  2 - Geometric      (rete con loss geometrica)
-  3 - Confronto      (confronta entrambe le reti)
-
-Scelta (1/2/3): 3
-
-Quante immagini vuoi analizzare?
-Numero (invio per tutte): 20
-```
-
-**Output:**
-- `confronto_results/visualizations/` - Confronti side-by-side
-- `confronto_results/metrics_comparison.txt` - Metriche aggregate
-- `confronto_results/metrics_comparison_chart.png` - Grafico barre
+Il menu interattivo elenca gli esperimenti disponibili in `experiments/`, chiede quale rete analizzare (baseline, geometrica o entrambe) e rigenera metriche e visualizzazioni in `4_confronto_finale/`.
 
 ---
 
-## Struttura Directory
+## Metriche
 
-```
-geometrica/
-├── train.py                          # Script interattivo training
-├── geometric_losses.py               # Loss V2.1 con protezioni anti-NaN
-├── nnUNetTrainer250Epochs.py         # Trainer baseline
-├── nnUNetTrainerGeometric.py         # Trainer geometric
-├── data_geom.py                      # Genera dataset
-├── convert_to_nnunet.py              # Conversione formato
-├── run_inference.py                  # Inference
-├── test.py                           # Analisi risultati
-├── README.md                         # Questo file
-├── GEOMETRIC_MODIFICATIONS.md        # Documentazione dettagliata
-│
-├── nnUNet_raw/                       # Dataset nnU-Net
-│   └── Dataset501_Shapes/
-│       ├── imagesTr/                 # 500 immagini .nii.gz
-│       ├── labelsTr/                 # 500 ground truth
-│       └── dataset.json
-│
-├── nnUNet_preprocessed/              # Dataset preprocessato
-│   └── Dataset501_Shapes/
-│
-├── nnUNet_results/                   # Modelli trained
-│   └── Dataset501_Shapes/
-│       ├── nnUNetTrainer250Epochs__nnUNetPlans__2d/
-│       │   └── fold_0/
-│       │       ├── checkpoint_final.pth
-│       │       └── checkpoint_best.pth
-│       └── nnUNetTrainerGeometric__nnUNetPlans__2d/
-│           └── fold_0/
-│               ├── checkpoint_final.pth
-│               └── checkpoint_best.pth
-│
-├── baseline_results/                 # Risultati baseline
-│   ├── predictions/                  # 100 predizioni
-│   ├── visualizations/               # PNG per ogni caso
-│   ├── metrics_summary.json
-│   └── metrics_summary.txt
-│
-├── geometric_results/                # Risultati geometric
-│   ├── predictions/
-│   ├── visualizations/
-│   ├── metrics_summary.json
-│   └── metrics_summary.txt
-│
-└── confronto_results/                # Confronto modelli
-    ├── visualizations/               # Confronti side-by-side
-    ├── metrics_comparison_chart.png  # Grafico barre
-    ├── metrics_comparison.json
-    └── metrics_comparison.txt
-```
+### Overlap pred/GT
+| Metrica | Formula | Direzione |
+|---------|---------|-----------|
+| **Dice Score** | 2·\|P∩G\| / (\|P\|+\|G\|) | ↑ |
+| **IoU** | \|P∩G\| / \|P∪G\| | ↑ |
+| **Hausdorff Distance** | max distanza tra contorni | ↓ |
+| **Boundary IoU** | IoU calcolato solo sui bordi (±3 px) | ↑ |
+
+### Qualità della forma (sulla predizione)
+| Metrica | Formula | Direzione |
+|---------|---------|-----------|
+| **Compactness** | (4π·Area) / Perimetro² | ↑ (1.0 = cerchio perfetto) |
+| **Eccentricity** | √(1 − (b/a)²) via fitting ellisse | ↓ (0.0 = cerchio perfetto) |
 
 ---
 
-## Metriche Calcolate
+## Pesi Loss Geometrica
 
-### Standard
-- **Dice Score**: Overlap tra predizione e ground truth
-- **IoU**: Intersection over Union
-
-### Geometriche
-- **Compactness**: (4π·Area)/Perimeter² - circolarità (1.0 = cerchio perfetto)
-- **Solidity**: Area/ConvexHull_Area - convessità (1.0 = nessuna concavità)
-- **Eccentricity**: √(1-(minor/major)²) - ellitticità (0.0 = cerchio)
-
-### Distanza
-- **Hausdorff Distance**: Massima distanza tra contorni
-- **Boundary IoU**: IoU calcolato solo sui bordi (±3 pixel)
-
----
-
-## Novità Versione 2.1
-
-### Protezioni Anti-NaN
-
-La versione 2.1 include protezioni robuste contro NaN nelle loss geometriche:
-
-1. **Clamping valori**: Area, perimeter, momenti di inerzia clampati a range sicuri
-2. **Check NaN**: Ogni loss è controllata per NaN/Inf e settata a 0 se problematica
-3. **Epsilon più grandi**: Divisioni con epsilon da 1e-4 aumentati a 1e-2
-4. **Pesi ridotti 10x**: Loss geometriche meno aggressive per stabilità
-5. **Warm-up aumentato**: 20 epoche invece di 5 per stabilizzare training
-
-### Configurazione Geometric V2.1
+I pesi vengono scritti automaticamente in `geometric_config.py` dai valori definiti in `config.py`.
 
 ```python
-# Pesi loss (ridotti per stabilità)
-weight_compactness = 0.01   # Era 0.1
-weight_solidity = 0.01      # Era 0.1
-weight_eccentricity = 0.005 # Era 0.05
-weight_boundary = 0.005     # Era 0.05
-
-# Warm-up
-warmup_epochs = 20  # Era 5
-
-# Training schedule
-# Epoche 0-19:  Solo Dice + CE
-# Epoche 20-99: Dice + CE + Geometric
+# Valori di default
+WEIGHT_COMPACTNESS  = 0.01   # Area vs Perimetro²
+WEIGHT_ECCENTRICITY = 0.03   # Rapporto assi (momenti di inerzia)
+WEIGHT_BOUNDARY     = 0.005  # Smoothness bordi
+WARMUP_EPOCHS       = 15     # Epoche prima di attivare la loss geometrica
 ```
+
+**Regola empirica:**
+- Aumenta `WEIGHT_ECCENTRICITY` se le predizioni rimangono ellittiche
+- Se il Dice Score scende sotto 0.94, riduci i pesi (es. dimezza tutti)
+- Se compare NaN durante il training, aumenta `WARMUP_EPOCHS` o dimezza i pesi
 
 ---
 
 ## Troubleshooting
 
-### Problema: NaN nei pesi durante training
+**NaN nei pesi durante il training**
+Aumenta `WARMUP_EPOCHS` a 30–40, oppure riduci i pesi geometrici della metà.
 
-**Soluzione**: La V2.1 include protezioni anti-NaN. Se ancora hai problemi:
-1. Aumenta warm-up a 30-40 epoche
-2. Riduci ulteriormente i pesi geometric (0.005, 0.005, 0.001, 0.001)
+**Predizioni vuote (tutto zero)**
+Il checkpoint è corrotto (training fallito per gradient explosion).
+Verifica `experiments/<FOLDER_NAME>/logs/verify.log` e ri-allena con pesi più bassi.
 
-### Problema: Predizioni vuote (tutti zero)
+**OOM durante il training**
+Riduci `BATCH_SIZE = 4` oppure `GEOMETRIC_LOSS_SAMPLES = 2` in `config.py`.
 
-**Causa**: Pesi NaN nel checkpoint
-**Soluzione**: Ri-allena con V2.1 che include protezioni
-
-### Problema: OOM durante training
-
-**Soluzione 1**: Riduci batch_size a 4 in `nnUNetTrainerGeometric.py`:
-```python
-config_data['batch_size'] = 4
-```
-
-**Soluzione 2**: Riduci `geometric_loss_samples` a 2:
-```python
-self.geometric_loss_samples = 2
-```
-
-### Problema: Dice score geometric < 0.98
-
-**Causa**: Pesi loss geometriche troppo alti
-**Soluzione**: Sono già ridotti in V2.1, ma se necessario riduci ulteriormente
-
----
-
-## Testing Loss Geometriche
-
-Per verificare che le loss funzionino correttamente:
-
-```bash
-python geometric_losses.py
-```
-
-Output atteso:
-```
-================================================================================
-TEST: Differentiable Geometric Losses V2.2 (fix computational graph + safety checks)
-================================================================================
-
---- Test GeometricLosses wrapper ---
-
-✅ Total Loss: 0.XXXXXX
-   Componenti: {'compactness': 0.XXX, 'boundary': 0.XXX, 'aspect': 0.XXX, ...}
-
-   ✅ Loss è un numero valido
-
-🔍 Testing gradient flow...
-   Gradient statistics (on logits - leaf tensor):
-      mean = 0.XXXXXXXX
-      max  = 0.XXXXXXXX
-      std  = 0.XXXXXXXX
-
-   ✅✅✅ GRADIENT FLOW OK!
-   I gradienti sono presenti e non-zero - la rete può imparare!
-
-================================================================================
-✅ Test completato!
-================================================================================
-```
+**Eccentricity non migliora**
+Aumenta `WEIGHT_ECCENTRICITY = 0.05` (il default è 0.03).
 
 ---
 
 ## Requisiti
 
-### Librerie Python
 ```bash
-pip install nnunetv2
-pip install numpy scipy scikit-image opencv-python
-pip install matplotlib nibabel
+pip install nnunetv2 numpy scipy scikit-image opencv-python matplotlib nibabel
 ```
 
-### Hardware
-- GPU: Raccomandato (CUDA-capable)
-- RAM: ≥16 GB
-- Storage: ~5 GB (dataset + models + results)
-
----
-
-## Documentazione Dettagliata
-
-Per informazioni complete sull'implementazione:
-
-📖 Leggi [GEOMETRIC_MODIFICATIONS.md](GEOMETRIC_MODIFICATIONS.md)
-
-Include:
-- Formule matematiche dettagliate
-- Implementazione completa del codice
-- Spiegazione modifiche al training loop
-- Note tecniche e limitazioni
-
----
-
-## Workflow Completo Esempio
-
-```bash
-# 1. Setup (una volta sola)
-cd /workspace/geometrica
-python data_geom.py
-python convert_to_nnunet.py
-nnUNetv2_plan_and_preprocess -d 501
-
-# 2. Training (scegli Geometric, 100 epoche)
-python train.py
-
-# 3. Inference (dopo training completato)
-python run_inference.py --both
-
-# 4. Analisi (scegli Confronto, tutte le immagini)
-python test.py
-```
+Hardware consigliato: GPU CUDA, ≥16 GB RAM, ~5 GB storage per esperimento.
 
 ---
 
 ## Citazioni
 
-**nnU-Net:**
 ```
-Isensee, F., Jaeger, P. F., Kohl, S. A., Petersen, J., & Maier-Hein, K. H. (2021).
-nnU-Net: a self-configuring method for deep learning-based biomedical image segmentation.
-Nature methods, 18(2), 203-211.
+Isensee et al. (2021). nnU-Net: a self-configuring method for deep learning-based
+biomedical image segmentation. Nature Methods, 18(2), 203–211.
 ```
 
-**Questo progetto:**
-```
-Geometric Circle Segmentation with nnU-Net V2.1
-Francesco + Claude, 2025
-https://github.com/[your-repo]
-```
-
----
-
-## Licenza
-
-Stesso di nnU-Net (Apache 2.0)
-
----
-
-**Ultimo aggiornamento:** 2025-12-10
-**Versione:** 2.1 (con protezioni anti-NaN e script interattivo)
+Licenza: Apache 2.0 (stessa di nnU-Net)

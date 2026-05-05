@@ -1,0 +1,37 @@
+CONFRONTO METRICHE FILTRATE – test_40_4
+======================================================================
+Immagini usate:   148  (escluse 12 peggiori per rete)
+Immagini escluse: ['shape_0005', 'shape_0024', 'shape_0034', 'shape_0045', 'shape_0069', 'shape_0077', 'shape_0106', 'shape_0111', 'shape_0131', 'shape_0148', 'shape_0149', 'shape_0156']
+  nota: compactness/eccentricity escluse quando pred è vuota
+  nota: hausdorff_distance — mediana usata nel confronto
+
+────────────────────────────────────────
+BASELINE
+────────────────────────────────────────
+  dice                     : 0.9333 ± 0.1535
+  iou                      : 0.9021 ± 0.1918
+  compactness              : 0.8472 ± 0.0811  (n=148/148 pred non-vuote)
+  eccentricity             : 0.2559 ± 0.2168  (n=148/148 pred non-vuote)
+  hausdorff_distance       : 14.7749 ± 45.3930  [p95: 59.2541]
+  boundary_iou             : 0.6485 ± 0.2774
+
+────────────────────────────────────────
+GEOMETRICA
+────────────────────────────────────────
+  dice                     : 0.9697 ± 0.0893
+  iou                      : 0.9513 ± 0.1182
+  compactness              : 0.8659 ± 0.0485  (n=148/148 pred non-vuote)
+  eccentricity             : 0.2032 ± 0.1710  (n=148/148 pred non-vuote)
+  hausdorff_distance       : 6.7530 ± 13.2723  [p95: 27.8577]
+  boundary_iou             : 0.7078 ± 0.2489
+
+────────────────────────────────────────
+MIGLIORAMENTI GEOMETRIC vs BASELINE
+────────────────────────────────────────
+  (hausdorff_distance: confronto su p95; altri: su media)
+  dice                     : +3.91%
+  iou                      : +5.45%
+  compactness              : +2.21%
+  eccentricity             : +20.60%
+  hausdorff_distance       : +52.99%
+  boundary_iou             : +9.15%

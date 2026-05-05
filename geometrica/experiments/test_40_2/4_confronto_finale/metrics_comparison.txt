@@ -1,0 +1,37 @@
+CONFRONTO METRICHE AGGREGATE – test_40_2
+======================================================================
+Immagini test analizzate: 160
+  nota: compactness/eccentricity escluse quando pred è vuota
+  nota: hausdorff_distance — mediana usata nel confronto (robusta agli outlier)
+
+────────────────────────────────────────
+BASELINE
+────────────────────────────────────────
+  dice                     : 0.9508 ± 0.1986
+  iou                      : 0.9443 ± 0.2027
+  compactness              : 0.8702 ± 0.0553  (n=159/160 pred non-vuote)
+  eccentricity             : 0.1247 ± 0.1242  (n=159/160 pred non-vuote)
+  hausdorff_distance       : 14.8487 ± 73.4715  [p95: 29.4328]
+  boundary_iou             : 0.8116 ± 0.2287
+
+────────────────────────────────────────
+GEOMETRICA
+────────────────────────────────────────
+  dice                     : 0.9548 ± 0.1738
+  iou                      : 0.9445 ± 0.1886
+  compactness              : 0.8667 ± 0.0555  (n=160/160 pred non-vuote)
+  eccentricity             : 0.1309 ± 0.1285  (n=160/160 pred non-vuote)
+  hausdorff_distance       : 12.9497 ± 57.0599  [p95: 16.9984]
+  boundary_iou             : 0.8042 ± 0.2379
+
+
+────────────────────────────────────────
+MIGLIORAMENTI GEOMETRIC vs BASELINE
+────────────────────────────────────────
+  (hausdorff_distance: confronto su p95; altri: su media)
+  dice                     : +0.42%
+  iou                      : +0.02%
+  compactness              : -0.40%
+  eccentricity             : -4.97%
+  hausdorff_distance       : +42.25%
+  boundary_iou             : -0.92%
