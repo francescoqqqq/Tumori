@@ -21,10 +21,13 @@ except Exception:
 BATCH_SIZE = 8   # -> sostituito con il valore di BATCH_SIZE del blocco config
 
 
+_DEFAULT_DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
 class nnUNetTrainerBaseline(nnUNetTrainer):
 
     def __init__(self, plans: dict, configuration: str, fold: int, dataset_json: dict,
-                 device: torch.device = torch.device('cuda')):
+                 device: torch.device = _DEFAULT_DEVICE):
         # Override batch_size nei plans prima di chiamare super(), identico
         # al trainer geometrico, per garantire lo stesso batch a entrambe le reti
         # e rendere la comparazione scientificamente valida.

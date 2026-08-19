@@ -116,6 +116,36 @@ from metrics_utils import (  # noqa: E402
 #  UTILITY
 # ==============================================================================
 
+_resolved_device_cache = None
+
+
+def _resolve_device():
+    """
+    Determina il device da passare a nnU-Net CLI (-device cuda/cpu/mps).
+
+    DEVICE in config.py puo' essere "auto" (autodetect cuda -> mps -> cpu)
+    oppure un valore esplicito ("cuda", "cpu", "mps") per forzare un device.
+    Il risultato viene calcolato una sola volta e messo in cache, cosi' le
+    macchine senza GPU non richiedono alcuna modifica manuale al progetto.
+    """
+    global _resolved_device_cache
+    if _resolved_device_cache is not None:
+        return _resolved_device_cache
+
+    if DEVICE != "auto":
+        _resolved_device_cache = DEVICE
+        return _resolved_device_cache
+
+    import torch  # noqa: PLC0415
+    if torch.cuda.is_available():
+        _resolved_device_cache = "cuda"
+    elif getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
+        _resolved_device_cache = "mps"
+    else:
+        _resolved_device_cache = "cpu"
+    return _resolved_device_cache
+
+
 def _separator(title=""):
     width = 65
     print(f"\n{'='*width}")
@@ -822,8 +852,10 @@ def run_training_single(net_type):
     # e scatta sempre il fallback hardcoded, ignorando i pesi impostati dall'utente.
     existing_pp = os.environ.get("PYTHONPATH", "")
     pythonpath = f"{SCRIPT_DIR}:{existing_pp}" if existing_pp else SCRIPT_DIR
+    device = _resolve_device()
+    print(f"  Device     : {device}")
     _run_subprocess(
-        ["nnUNetv2_train", str(DATASET_ID), "2d", "0", "-tr", trainer_name],
+        ["nnUNetv2_train", str(DATASET_ID), "2d", "0", "-tr", trainer_name, "-device", device],
         f"Training {net_type}",
         extra_env={"nnUNet_n_proc_DA": "0", "PYTHONPATH": pythonpath},
     )
@@ -1099,6 +1131,7 @@ def run_inference_single(net_type):
 
     with tempfile.TemporaryDirectory(prefix="nnunet_inf_") as tmp_input:
         _convert_test_to_nifti(tmp_input)
+        device = _resolve_device()
         _run_subprocess([
             "nnUNetv2_predict",
             "-i", tmp_input,
@@ -1107,6 +1140,7 @@ def run_inference_single(net_type):
             "-c", "2d",
             "-f", "0",
             "-tr", trainer_name,
+            "-device", device,
             "--disable_tta",
         ], f"Inferenza {net_type}",
         extra_env={"nnUNet_n_proc_DA": "0"})
@@ -1298,6 +1332,7 @@ def main():
     print(f"  Dataset  : {DATASET_ID} ({DATASET_NAME})")
     print(f"  Reti     : {RETI_DA_ALLENARE}")
     print(f"  Modalità : {'AUTOMATICA' if AUTOMATIC == 'si' else 'INTERATTIVA'}")
+    print(f"  Device   : {_resolve_device()}  (config DEVICE='{DEVICE}')")
 
     # ── Setup interattivo: nome cartella + conferma dataset ────────────────
     if AUTOMATIC == "no":

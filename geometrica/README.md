@@ -203,10 +203,13 @@ Aumenta `WEIGHT_ECCENTRICITY = 0.05` (il default è 0.03).
 ## Requisiti
 
 ```bash
-pip install nnunetv2 numpy scipy scikit-image opencv-python matplotlib nibabel
+pip install -r requirements.txt
 ```
 
-Hardware consigliato: GPU CUDA, ≥16 GB RAM, ~5 GB storage per esperimento.
+`DEVICE = "auto"` in `config.py` rileva automaticamente GPU CUDA/MPS o CPU:
+nessuna modifica manuale necessaria spostando il progetto su un'altra
+macchina. Hardware consigliato: GPU CUDA, ≥16 GB RAM, ~5 GB storage per
+esperimento (funziona anche su CPU, più lento).
 
 ---
 

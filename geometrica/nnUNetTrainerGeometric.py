@@ -36,6 +36,9 @@ except ImportError:
     GEOMETRIC_LOSS_SAMPLES = 4
 
 
+_DEFAULT_DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
 class nnUNetTrainerGeometric(nnUNetTrainer):
     """
     Trainer nnU-Net con loss geometrica per segmentazione cerchi.
@@ -45,7 +48,7 @@ class nnUNetTrainerGeometric(nnUNetTrainer):
     """
 
     def __init__(self, plans: dict, configuration: str, fold: int,
-                 dataset_json: dict, device: torch.device = torch.device('cuda')):
+                 dataset_json: dict, device: torch.device = _DEFAULT_DEVICE):
         """
         Inizializza trainer geometric.
 

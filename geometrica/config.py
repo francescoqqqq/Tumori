@@ -24,6 +24,12 @@ EPOCHS           = 100
 BATCH_SIZE       = 8             # batch size per GPU
 WARMUP_EPOCHS    = 15            # Epoche warm-up prima di attivare loss geometrica
 
+# Device di training/inference: "auto" rileva automaticamente cuda/mps/cpu
+# (usa GPU se disponibile, altrimenti CPU) → nessuna modifica manuale serve
+# quando si sposta il progetto su una macchina diversa. Valori espliciti
+# supportati da nnU-Net: "cuda", "cpu", "mps".
+DEVICE           = "auto"
+
 # Pesi loss geometrica (solo per rete geometrica)
 WEIGHT_COMPACTNESS      = 0.03
 WEIGHT_ECCENTRICITY     = 0.05
