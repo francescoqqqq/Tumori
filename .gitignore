@@ -35,6 +35,7 @@ __pycache__/
 venv/
 env/
 ENV/
+.venv/
 
 # ===== IDE / editor =====
 .vscode/
@@ -54,3 +55,23 @@ training.log
 # ===== File temporanei =====
 *.tmp
 *.temp
+
+# ===== Dev container / VS Code Server (runtime, machine-specific) =====
+# Dati runtime del server VS Code (estensioni, cache, sessioni, machine id):
+# rigenerati automaticamente ad ogni avvio del devcontainer, mai da versionare.
+.vscode-server/
+.devcontainer/.onCreateCommandMarker
+.devcontainer/.postCreateCommandMarker
+.devcontainer/.postStartCommandMarker
+.devcontainer/.updateContentCommandMarker
+
+# ===== Credenziali / identità utente (MAI committare) =====
+.ssh/
+.gitconfig
+.env
+*.pem
+*.key
+
+# ===== Librerie GPU/driver copiate nel container (machine-specific) =====
+/libcuda.so*
+/libnvidia-ml.so*
