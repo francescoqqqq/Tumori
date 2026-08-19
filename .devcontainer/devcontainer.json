@@ -12,10 +12,10 @@
         "nnUNet_preprocessed": "/workspace/nnUNet_preprocessed",
         "nnUNet_results": "/workspace/nnUNet_results"
     },
-    "runArgs": [
-        "--device",
-        "nvidia.com/gpu=all"
-    ],
+    // "runArgs": [
+    //     "--device",
+    //     "nvidia.com/gpu=all"
+    // ],
     "customizations": {
         "vscode": {
             "settings": {
