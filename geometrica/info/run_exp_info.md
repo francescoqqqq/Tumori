@@ -86,37 +86,47 @@ Output: dataset preprocessato in `2_nnunet_engine/nnUNet_preprocessed`.
 
 ## 9) STEP 3 - Come vengono usati i trainer custom
 
-### 9.1 Installazione trainer nel package nnU-Net
+### 9.1 Discovery dei trainer custom (nessuna copia nel package nnU-Net)
 
-Funzione: `install_trainer_files()`
+Funzione: `prepare_trainer_environment()` (in precedenza `install_trainer_files()`)
 
-Copia dal progetto al package installato:
-- `nnUNetTrainerBaseline.py`
-- `nnUNetTrainerGeometric.py`
-- `geometric_losses.py`
+I trainer custom **non vengono piu' copiati** dentro il package `nnunetv2`
+installato (site-packages): restano sempre in `geometrica/` insieme al resto
+del progetto. Questo evita di richiedere permessi di scrittura su
+site-packages, un problema reale su ambienti condivisi/read-only.
 
-Quindi nnU-Net, quando invocato da CLI, trova questi trainer con i nomi attesi.
+La discovery avviene invece a runtime tramite `_run_nnunet_entry()` +
+`NNUNET_BOOTSTRAP_TEMPLATE`: invece di lanciare le CLI `nnUNetv2_train` /
+`nnUNetv2_predict`, lo script lancia `sys.executable -c <bootstrap>` dove il
+bootstrap, PRIMA di importare nnunetv2:
+1. inserisce `SCRIPT_DIR` (geometrica/) in `sys.path`
+2. estende `nnunetv2.training.nnUNetTrainer.__path__` con `SCRIPT_DIR`, cosi'
+   `from nnunetv2.training.nnUNetTrainer.geometric_losses import ...` risolve
+   direttamente `geometrica/geometric_losses.py`
+3. patcha `recursive_find_python_class` con un fallback che cerca anche in
+   `SCRIPT_DIR`, cosi' `-tr nnUNetTrainerBaseline` / `-tr nnUNetTrainerGeometric`
+   vengono trovati anche se non installati nel package
 
-### 9.2 Patch parametri training nel package
+Quindi nnU-Net, quando invocato, trova questi trainer con i nomi attesi senza
+alcun file extra copiato/installato.
 
-Funzione: `_patch_epochs_in_trainer()`
+### 9.2 Parametri training (epoche, batch size)
 
-Effettua patch testuale su file trainer nel package per allineare:
-- `self.num_epochs`
-- `BATCH_SIZE`
-- (nel geometrico) warmup e override batch safety
-
-Serve a far combaciare i parametri del blocco config con cio' che i trainer eseguono realmente.
+Nessun patch testuale sui file trainer: `nnUNetTrainerBaseline.py` e
+`nnUNetTrainerGeometric.py` leggono direttamente `NUM_EPOCHS` / `BATCH_SIZE`
+(e, per il geometrico, i pesi delle loss + `WARMUP_EPOCHS`) da
+`geometric_config.py` con un `try/except ImportError` di fallback. Questo
+allinea sempre i parametri realmente eseguiti al blocco config dell'esperimento
+corrente, senza dover riscrivere il sorgente dei trainer.
 
 ### 9.3 Generazione config geometrica
 
 Funzione: `_write_geometric_config()`
 
-Genera `geometric_config.py` con pesi e iperparametri correnti e lo scrive in:
-- cartella trainer del package nnU-Net
-- root del progetto (`SCRIPT_DIR`)
-
-Motivo: assicurare che subprocess e import risolvano la stessa configurazione.
+Genera `geometric_config.py` con pesi e iperparametri correnti e lo scrive
+solo nella root del progetto (`SCRIPT_DIR`): il bootstrap inserisce
+`SCRIPT_DIR` in `sys.path` prima di importare i trainer, quindi la risoluzione
+e' sempre coerente indipendentemente da cwd o `PYTHONPATH`.
 
 ## 10) Processo di allenamento: baseline vs geometrica
 
@@ -127,10 +137,12 @@ Motivo: assicurare che subprocess e import risolvano la stessa configurazione.
 - `"geometrica"` -> solo geometrica
 - `"entrambe"` -> baseline poi geometrica
 
-### 10.2 Lancio training via CLI nnU-Net
+### 10.2 Lancio training
 
-`run_training_single(net_type)` esegue:
-- `nnUNetv2_train <DATASET_ID> 2d 0 -tr <trainer_name>`
+`run_training_single(net_type)` esegue, tramite `_run_nnunet_entry()` (bootstrap
+in-process, non la CLI `nnUNetv2_train`):
+- entry point `nnunetv2.run.run_training.run_training_entry` con argomenti
+  `<DATASET_ID> 2d 0 -tr <trainer_name> -device <device>`
 
 dove `<trainer_name>` e':
 - `nnUNetTrainerBaseline` per baseline
@@ -147,7 +159,7 @@ Caratteristiche:
 - non aggiunge loss geometriche
 - forza batch size nei plans e in configuration manager
 - usa loss standard nnU-Net (Dice + CE)
-- usa numero epoche patchato dal master script
+- usa `NUM_EPOCHS` letto da `geometric_config.py` (fallback 100 se assente)
 
 Quindi e' la rete di controllo "classica".
 
@@ -177,7 +189,7 @@ In sintesi: stessa base nnU-Net, ma con vincoli geometrici aggiuntivi e protezio
 Per ogni rete allenata:
 1. verifica checkpoint (niente NaN/Inf nei pesi)
 2. converte test PNG -> NIfTI temporanei
-3. chiama `nnUNetv2_predict` col trainer corretto
+3. chiama l'entry point `predict_entry_point` (via `_run_nnunet_entry()`) col trainer corretto
 4. converte predizioni NIfTI (0/1) -> PNG (0/255)
 
 Output in `3_predizioni/`.
@@ -200,7 +212,7 @@ Output in `3_predizioni/`.
 1. setup (eventuale interattivo)
 2. STEP 1 dataset
 3. STEP 2 conversione/preprocess
-4. STEP 3 install trainer + training
+4. STEP 3 prepara config trainer + training
 5. STEP 4 inference
 6. STEP 5 confronto
 7. riepilogo finale
@@ -211,7 +223,10 @@ Il collegamento avviene in tre punti chiave:
 1. mapping nomi trainer:
    - `"baseline"` -> `"nnUNetTrainerBaseline"`
    - `"geometrica"` -> `"nnUNetTrainerGeometric"`
-2. installazione/copia trainer custom nel package nnU-Net
-3. chiamata CLI con `-tr <trainer_name>` per forzare il trainer desiderato
+2. bootstrap dei path (`NNUNET_BOOTSTRAP_TEMPLATE`) che rende i trainer in
+   `geometrica/` scopribili da nnU-Net senza copiarli nel package installato
+3. chiamata all'entry point con `-tr <trainer_name>` per forzare il trainer desiderato
 
-Quindi il master script non allena "manualmente": prepara ambiente+file e poi delega il training a `nnUNetv2_train` scegliendo il trainer custom tramite nome.
+Quindi il master script non allena "manualmente": prepara ambiente+file e poi
+delega il training all'entry point `run_training_entry` di nnU-Net (in-process,
+via `_run_nnunet_entry()`) scegliendo il trainer custom tramite nome.

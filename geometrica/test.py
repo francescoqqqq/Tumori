@@ -43,6 +43,51 @@ from metrics_utils import (  # noqa: E402
     create_vis_bad,
 )
 
+# ==============================================================================
+#  BOOTSTRAP TRAINER CUSTOM  –  nessun file copiato nel package nnunetv2
+# ==============================================================================
+# Stessa soluzione usata da run_experiment.py (vedi commento li' per il
+# dettaglio): i trainer custom (nnUNetTrainerBaseline, nnUNetTrainerGeometric,
+# geometric_losses) restano in geometrica/ e vengono trovati a runtime senza
+# richiedere permessi di scrittura su site-packages.
+_NNUNET_BOOTSTRAP_TEMPLATE = '''\
+import sys
+script_dir = {script_dir!r}
+if script_dir not in sys.path:
+    sys.path.insert(0, script_dir)
+
+import nnunetv2.training.nnUNetTrainer as _trainer_pkg
+if script_dir not in _trainer_pkg.__path__:
+    _trainer_pkg.__path__.insert(0, script_dir)
+
+import nnunetv2.utilities.find_class_by_name as _fcbn
+_original_rfpc = _fcbn.recursive_find_python_class
+
+
+def _patched_rfpc(folder, class_name, current_module):
+    result = _original_rfpc(folder, class_name, current_module)
+    if result is None:
+        result = _original_rfpc(script_dir, class_name, "nnunetv2.training.nnUNetTrainer")
+    return result
+
+
+_fcbn.recursive_find_python_class = _patched_rfpc
+
+from {entry_module} import {entry_func}
+{entry_func}()
+'''
+
+
+def _run_nnunet_entry(entry_module, entry_func, cli_args, env=None):
+    """Lancia un entry point nnU-Net (es. predict_entry_point) risolvendo i
+    trainer custom direttamente da geometrica/, senza CLI nnUNetv2_predict."""
+    bootstrap_code = _NNUNET_BOOTSTRAP_TEMPLATE.format(
+        script_dir=SCRIPT_DIR, entry_module=entry_module, entry_func=entry_func,
+    )
+    cmd = [sys.executable, "-c", bootstrap_code] + list(cli_args)
+    return subprocess.run(cmd, env=env)
+
+
 _METRIC_NAMES = ["dice", "iou", "compactness", "eccentricity",
                  "hausdorff_distance", "boundary_iou"]
 _SHAPE_METRICS = {"compactness", "eccentricity"}
@@ -282,8 +327,7 @@ def _run_external_inference(target_exp_dir, source_exp_name, net_type, dataset_i
 
         _convert_to_nifti(test_img_dir, tmp_in)
 
-        cmd = [
-            "nnUNetv2_predict",
+        cli_args = [
             "-i", tmp_in,
             "-o", tmp_out,
             "-d", str(dataset_id),
@@ -292,8 +336,11 @@ def _run_external_inference(target_exp_dir, source_exp_name, net_type, dataset_i
             "-tr", trainer_name,
             "--disable_tta",
         ]
-        print(f"\n  Avvio nnUNetv2_predict...")
-        result = subprocess.run(cmd, env=env)
+        print(f"\n  Avvio predict_entry_point...")
+        result = _run_nnunet_entry(
+            "nnunetv2.inference.predict_from_raw_data", "predict_entry_point",
+            cli_args, env=env,
+        )
         if result.returncode != 0:
             print(f"\n  ✗ Inference fallita (exit code {result.returncode})")
             return None

@@ -1,10 +1,11 @@
 """
-Trainer baseline personalizzato per nnU-Net.
-Deve essere copiato in: nnunetv2/training/nnUNetTrainer/
+Trainer baseline personalizzato per nnU-Net (Dice + CE, nessuna loss geometrica).
 
-NOTA: num_epochs e BATCH_SIZE vengono patchati dinamicamente da
-run_experiment.py prima del training, quindi i valori hardcoded qui
-sotto sono solo placeholder di default.
+Risiede in geometrica/ e viene trovato a runtime da run_experiment.py tramite
+un bootstrap che estende la ricerca dei trainer di nnunetv2 a questa cartella
+(vedi NNUNET_BOOTSTRAP_TEMPLATE in run_experiment.py): non viene copiato ne'
+installato dentro il package nnunetv2, quindi non serve alcun permesso di
+scrittura su site-packages.
 """
 from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
 import torch
@@ -17,8 +18,16 @@ try:
 except Exception:
     pass
 
-# Placeholder patchati da run_experiment.py prima del training
-BATCH_SIZE = 8   # -> sostituito con il valore di BATCH_SIZE del blocco config
+# Configurazione centralizzata (stesso file usato da nnUNetTrainerGeometric):
+# generata da run_experiment.py con i valori dell'esperimento corrente.
+_TRAINER_CONFIG_LOADED = False
+try:
+    from geometric_config import NUM_EPOCHS, BATCH_SIZE
+    _TRAINER_CONFIG_LOADED = True
+except ImportError:
+    # Fallback se geometric_config non e' disponibile
+    NUM_EPOCHS = 100
+    BATCH_SIZE = 8
 
 
 _DEFAULT_DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -50,7 +59,7 @@ class nnUNetTrainerBaseline(nnUNetTrainer):
             _set_bs(plans)
 
         super().__init__(plans, configuration, fold, dataset_json, device)
-        self.num_epochs = 100  # -> patchato da run_experiment.py
+        self.num_epochs = NUM_EPOCHS
 
         # Override post-init (per sicurezza, come nel trainer geometrico)
         if hasattr(self, 'configuration_manager'):

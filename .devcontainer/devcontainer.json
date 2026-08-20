@@ -6,19 +6,19 @@
     "remoteUser": "root",
     "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
     "workspaceFolder": "/workspace",
-    // GPU opzionale: se l'host non espone driver NVIDIA (nessuna GPU, o macchina
-    // CPU-only) i link vengono semplicemente saltati invece di far fallire il
-    // postCreateCommand, cosi' lo stesso devcontainer funziona ovunque.
-    "postCreateCommand": "bash -c 'NVML=$(find /usr/lib/x86_64-linux-gnu-host -name \"libnvidia-ml.so.*\" 2>/dev/null | head -1); CUDA=$(find /usr/lib/x86_64-linux-gnu-host -name \"libcuda.so.*[0-9]\" 2>/dev/null | head -1); if [ -n \"$NVML\" ] && [ -n \"$CUDA\" ]; then ln -sf \"$NVML\" /usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1 && ln -sf \"$CUDA\" /usr/lib/x86_64-linux-gnu/libcuda.so.1 && ldconfig && echo \"[postCreateCommand] GPU NVIDIA rilevata: driver linkati.\"; else echo \"[postCreateCommand] Nessuna GPU NVIDIA rilevata: si procede in modalita CPU-only.\"; fi'",
     "containerEnv": {
         "nnUNet_raw": "/workspace/nnUNet_raw",
         "nnUNet_preprocessed": "/workspace/nnUNet_preprocessed",
-        "nnUNet_results": "/workspace/nnUNet_results"
+        "nnUNet_results": "/workspace/nnUNet_results",
+        "NVIDIA_VISIBLE_DEVICES": "all",
+        "NVIDIA_DRIVER_CAPABILITIES": "compute,utility"
     },
-    // "runArgs": [
-    //     "--device",
-    //     "nvidia.com/gpu=all"
-    // ],
+    "runArgs": [
+        "--gpus=all"
+    ],
+    "hostRequirements": {
+        "gpu": true
+    },
     "customizations": {
         "vscode": {
             "settings": {

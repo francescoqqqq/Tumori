@@ -1,0 +1,13 @@
+# Dipendenze del progetto clinico (dataset BraTS + nnU-Net).
+# Installazione: pip install -r requirements.txt
+#
+# nnunetv2 installa gia' torch come dipendenza transitiva; se serve una
+# build specifica di torch (es. CPU-only o una versione CUDA precisa),
+# installarla PRIMA di questo file seguendo le istruzioni su
+# https://pytorch.org/get-started/locally/
+nnunetv2
+numpy
+nibabel
+matplotlib
+tqdm
+synapseclient

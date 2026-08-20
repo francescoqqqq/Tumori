@@ -2,12 +2,12 @@
 #  config.py  –  Parametri esperimento  
 # ==============================================================================
 
-FOLDER_NAME      = "test_40_5"   # Nome sottocartella dentro experiments/
+FOLDER_NAME      = "test_40_6"   # Nome sottocartella dentro experiments/
 AUTOMATIC        = "si"          # "si" = pipeline automatica  |  "no" = conferma interattiva step-by-step
 
 # --- Dataset ---
 IMG_SIZE         = 512           # Lato immagine quadrata (px)
-NUM_IMAGES       = 200           # Totale immagini generate
+NUM_IMAGES       = 50           # Totale immagini generate
 SPLIT_TEST_SIZE  = 0.80          # Frazione test set  (0.2 → 20 %)
 TARGET_MODE      = 1             # 1 = single-circle  |  2 = multi-circle
 CIRCLE_ALONE     = "no"          # "si" = distrattori non sovrapposti ai cerchi (solo style=identico)
@@ -20,9 +20,9 @@ COLOR_STYLE      = "uguale"
 # --- nnU-Net e Training ---
 DATASET_ID       = 501           # ID numerico dataset (DatasetXXX_Shapes)
 RETI_DA_ALLENARE = "entrambe"   # "baseline" | "geometrica" | "entrambe"
-EPOCHS           = 100
+EPOCHS           = 6
 BATCH_SIZE       = 8             # batch size per GPU
-WARMUP_EPOCHS    = 15            # Epoche warm-up prima di attivare loss geometrica
+WARMUP_EPOCHS    = 2            # Epoche warm-up prima di attivare loss geometrica
 
 # Device di training/inference: "auto" rileva automaticamente cuda/mps/cpu
 # (usa GPU se disponibile, altrimenti CPU) → nessuna modifica manuale serve

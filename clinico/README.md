@@ -60,7 +60,7 @@ Per **rigenerare il dataset completo** da zero (necessario al primo setup o dopo
     Rimuove casi incompleti e aggiorna il `dataset.json` con il conteggio corretto.
 
 ## Prossimi Passi
-1.  Installare nnU-Net: `pip install nnunetv2`
+1.  Installare le dipendenze: `pip install -r requirements.txt`
 2.  Impostare variabili d'ambiente:
     ```bash
     export nnUNet_raw="/workspace/clinico/nnUNet_raw"

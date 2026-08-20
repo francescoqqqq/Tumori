@@ -154,6 +154,74 @@ def _separator(title=""):
         print(f"{'='*width}")
 
 
+def _cmd_for_display(cmd):
+    """Versione abbreviata di un cmd per stampa/log (nasconde script -c lunghi)."""
+    return [f"<bootstrap-script {len(part)} char>" if isinstance(part, str) and len(part) > 200
+            else part for part in cmd]
+
+
+# ==============================================================================
+#  BOOTSTRAP TRAINER CUSTOM  –  nessun file copiato nel package nnunetv2
+# ==============================================================================
+#
+# nnU-Net cerca i trainer (-tr NomeTrainer) e i moduli dentro
+# nnunetv2/training/nnUNetTrainer/. Le versioni precedenti di questo script
+# risolvevano il problema copiando nnUNetTrainerBaseline.py,
+# nnUNetTrainerGeometric.py e geometric_losses.py dentro il package installato
+# (site-packages) — richiede permessi di scrittura li', che possono mancare su
+# venv/conda condivise, installazioni di sistema o ambienti read-only.
+#
+# Soluzione portabile: un piccolo bootstrap eseguito PRIMA di importare
+# nnunetv2, che (1) estende nnunetv2.training.nnUNetTrainer.__path__ con
+# SCRIPT_DIR, cosi' `from nnunetv2.training.nnUNetTrainer.geometric_losses
+# import ...` risolve direttamente geometrica/geometric_losses.py, e (2) fa un
+# patch della funzione di discovery dei trainer con un fallback che cerca
+# anche in SCRIPT_DIR. Zero file extra, zero scritture fuori da geometrica/.
+NNUNET_BOOTSTRAP_TEMPLATE = '''\
+import sys
+script_dir = {script_dir!r}
+if script_dir not in sys.path:
+    sys.path.insert(0, script_dir)
+
+import nnunetv2.training.nnUNetTrainer as _trainer_pkg
+if script_dir not in _trainer_pkg.__path__:
+    _trainer_pkg.__path__.insert(0, script_dir)
+
+import nnunetv2.utilities.find_class_by_name as _fcbn
+_original_rfpc = _fcbn.recursive_find_python_class
+
+
+def _patched_rfpc(folder, class_name, current_module):
+    result = _original_rfpc(folder, class_name, current_module)
+    if result is None:
+        result = _original_rfpc(script_dir, class_name, "nnunetv2.training.nnUNetTrainer")
+    return result
+
+
+_fcbn.recursive_find_python_class = _patched_rfpc
+
+from {entry_module} import {entry_func}
+{entry_func}()
+'''
+
+
+def _run_nnunet_entry(entry_module, entry_func, cli_args, step_label, extra_env=None):
+    """
+    Lancia un entry point nnU-Net (es. run_training_entry, predict_entry_point)
+    in un subprocess Python isolato, con i trainer custom risolti direttamente
+    da geometrica/ (vedi NNUNET_BOOTSTRAP_TEMPLATE). Sostituisce le CLI
+    nnUNetv2_train / nnUNetv2_predict con lo stesso comportamento, ma:
+      - non richiede che le console-script entry point siano su PATH
+        (usa sys.executable, cioe' lo stesso interprete/venv di questo script)
+      - non copia/patcha nulla nel package nnunetv2 installato
+    """
+    bootstrap_code = NNUNET_BOOTSTRAP_TEMPLATE.format(
+        script_dir=SCRIPT_DIR, entry_module=entry_module, entry_func=entry_func,
+    )
+    cmd = [sys.executable, "-c", bootstrap_code] + list(cli_args)
+    _run_subprocess(cmd, step_label, extra_env=extra_env)
+
+
 def _format_duration(seconds):
     """Formatta secondi in Hh Mm Ss per stampa umana."""
     seconds = max(0.0, float(seconds))
@@ -189,7 +257,7 @@ def _run_subprocess(cmd, step_label, extra_env=None):
     # Forza Python a non bufferizzare stdout/stderr nel subprocess,
     # altrimenti le righe arrivano in blocchi e non in tempo reale.
     env["PYTHONUNBUFFERED"] = "1"
-    print(f"  Comando: {' '.join(cmd)}")
+    print(f"  Comando: {' '.join(_cmd_for_display(cmd))}")
     logs_dir = os.path.join(EXP_DIR, "logs")
     os.makedirs(logs_dir, exist_ok=True)
     safe_step = re.sub(r"[^a-zA-Z0-9_.-]+", "_", step_label.strip().lower())
@@ -232,7 +300,7 @@ def _run_subprocess(cmd, step_label, extra_env=None):
     with open(log_path, "w", encoding="utf-8") as log_f:
         log_f.write("=" * 80 + "\n")
         log_f.write(f"STEP: {step_label}\n")
-        log_f.write(f"CMD : {' '.join(cmd)}\n")
+        log_f.write(f"CMD : {' '.join(_cmd_for_display(cmd))}\n")
         log_f.write("=" * 80 + "\n")
         process = subprocess.Popen(
             cmd,
@@ -679,31 +747,15 @@ def run_preprocessing():
 #  STEP 3  –  Training
 # ==============================================================================
 
-def _find_nnunetv2_trainer_dir():
-    """Trova la directory trainer nel package nnunetv2 installato."""
-    try:
-        import nnunetv2 as _nn  # noqa: PLC0415
-        nnunetv2_root = os.path.dirname(_nn.__file__)
-        trainer_dir   = os.path.join(nnunetv2_root, "training", "nnUNetTrainer")
-        if not os.path.isdir(trainer_dir):
-            raise FileNotFoundError(trainer_dir)
-        return trainer_dir
-    except (ImportError, FileNotFoundError) as e:
-        raise RuntimeError(
-            f"Package nnunetv2 non trovato o struttura inattesa: {e}\n"
-            f"Assicurati che nnunetv2 sia installato nell'ambiente corrente."
-        ) from e
-
-
-def _write_geometric_config(trainer_dir):
+def _write_geometric_config():
     """
-    Genera geometric_config.py con i valori dell'esperimento corrente e lo scrive in:
-      1. trainer_dir  (package nnunetv2 installato)
-      2. SCRIPT_DIR   (cwd dei subprocess nnUNetv2_train / nnUNetv2_predict)
+    Genera geometric_config.py (pesi loss geometrica + NUM_EPOCHS/BATCH_SIZE/
+    WARMUP_EPOCHS) con i valori dell'esperimento corrente, dentro SCRIPT_DIR.
 
-    Il punto (2) è critico: quando il trainer gira come subprocess con
-    cwd=geometrica/, Python trova PRIMA il geometric_config.py nella cwd rispetto
-    a quello nel package. Scrivendo in entrambe le posizioni garantiamo coerenza.
+    Letto da nnUNetTrainerBaseline.py e nnUNetTrainerGeometric.py tramite un
+    semplice 'from geometric_config import ...': risolto sempre correttamente
+    perche' NNUNET_BOOTSTRAP_TEMPLATE inserisce SCRIPT_DIR in sys.path PRIMA
+    di importare i trainer, indipendentemente da cwd o variabili PYTHONPATH.
     """
     content = f'''"""
 geometric_config.py – auto-generato da run_experiment.py
@@ -724,119 +776,30 @@ GEOMETRIC_LOSS_SAMPLES = {GEOMETRIC_LOSS_SAMPLES}
 MIN_AREA_THRESHOLD = 50.0
 SQRT_CLAMP_MIN     = 1e-2
 '''
-    for dest in [
-        os.path.join(trainer_dir, "geometric_config.py"),
-        os.path.join(SCRIPT_DIR,  "geometric_config.py"),
-    ]:
-        with open(dest, "w") as f:
-            f.write(content)
-        print(f"    ✓ geometric_config.py → {dest}")
+    dest = os.path.join(SCRIPT_DIR, "geometric_config.py")
+    with open(dest, "w") as f:
+        f.write(content)
+    print(f"    ✓ geometric_config.py → {dest}")
 
 
-def _patch_epochs_in_trainer(trainer_dir):
+def prepare_trainer_environment():
     """
-    Patcha i valori di epoche direttamente nei file trainer installati,
-    sostituendo le variabili/costanti hardcoded con i valori del blocco config.
+    Prepara l'ambiente per il training/inference: scrive geometric_config.py
+    con i valori dell'esperimento corrente.
 
-    Perché è necessario:
-    - nnUNetTrainerBaseline ha self.num_epochs = 100 hardcoded nel sorgente.
-    - nnUNetTrainerGeometric: NUM_EPOCHS, WARMUP_EPOCHS e BATCH_SIZE vengono
-      patchati direttamente per sicurezza (anche se _write_geometric_config
-      già scrive il config nella cwd del subprocess).
-    Il patch diretto garantisce coerenza anche in casi edge (cache di moduli, ecc.).
+    I trainer custom (nnUNetTrainerBaseline.py, nnUNetTrainerGeometric.py,
+    geometric_losses.py) restano SEMPRE dentro geometrica/ e vengono trovati a
+    runtime da _run_nnunet_entry() tramite il bootstrap dei path: nessun file
+    viene copiato ne' patchato dentro il package nnunetv2 installato, quindi
+    non serve alcun permesso di scrittura su site-packages.
     """
-    import re  # noqa: PLC0415
-
-    # ── Baseline: self.num_epochs e BATCH_SIZE ────────────────────────────
-    target_b = os.path.join(trainer_dir, "nnUNetTrainerBaseline.py")
-    if os.path.exists(target_b):
-        with open(target_b) as f:
-            content = f.read()
-
-        # Patcha epoche
-        new_content, n_ep = re.subn(
-            r'self\.num_epochs\s*=\s*\d+',
-            f'self.num_epochs = {EPOCHS}',
-            content,
-        )
-        # Patcha BATCH_SIZE (placeholder nel sorgente: "BATCH_SIZE = 8")
-        new_content, n_bs = re.subn(
-            r'^BATCH_SIZE\s*=\s*\d+',
-            f'BATCH_SIZE = {BATCH_SIZE}',
-            new_content,
-            flags=re.MULTILINE,
-        )
-        if n_ep > 0 or n_bs > 0:
-            with open(target_b, "w") as f:
-                f.write(new_content)
-            print(f"    ✓ nnUNetTrainerBaseline    → epochs={EPOCHS}, batch={BATCH_SIZE}")
-        else:
-            print(f"    ⚠  pattern non trovati in nnUNetTrainerBaseline.py")
-    else:
-        print(f"    ⚠  nnUNetTrainerBaseline.py non trovato, skip")
-
-    # ── Geometric: epoche, warmup, batch_size ────────────────────────────────
-    target_g = os.path.join(trainer_dir, "nnUNetTrainerGeometric.py")
-    if os.path.exists(target_g):
-        with open(target_g) as f:
-            content = f.read()
-
-        new_content = re.sub(
-            r'self\.num_epochs\s*=\s*NUM_EPOCHS',
-            f'self.num_epochs = {EPOCHS}',
-            content,
-        )
-        new_content = re.sub(
-            r'self\.geometric_loss_warmup_epochs\s*=\s*WARMUP_EPOCHS',
-            f'self.geometric_loss_warmup_epochs = {WARMUP_EPOCHS}',
-            new_content,
-        )
-        # batch_size: il sorgente usa BATCH_SIZE (variabile importata).
-        # Aggiungiamo una riga di override esplicita dopo super().__init__ come
-        # ulteriore safety net, nel caso l'import di geometric_config fallisse.
-        if f'self._patched_batch_size = {BATCH_SIZE}' not in new_content:
-            new_content = new_content.replace(
-                'super().__init__(plans, configuration, fold, dataset_json, device)',
-                f'super().__init__(plans, configuration, fold, dataset_json, device)\n'
-                f'        self._patched_batch_size = {BATCH_SIZE}  # sentinel patch',
-            )
-        with open(target_g, "w") as f:
-            f.write(new_content)
-        print(f"    ✓ nnUNetTrainerGeometric      → epochs={EPOCHS}, "
-              f"warmup={WARMUP_EPOCHS}, batch={BATCH_SIZE}")
-    else:
-        print(f"    ⚠  nnUNetTrainerGeometric.py non trovato, skip")
-
-
-def install_trainer_files():
-    """
-    Copia nnUNetTrainerBaseline, nnUNetTrainerGeometric, geometric_losses
-    nella directory trainer del package nnunetv2 installato.
-    Patcha le epoche e scrive geometric_config.py con i valori del blocco config.
-    """
-    _separator("STEP 3a: INSTALLAZIONE TRAINER FILES")
-
-    trainer_dir = _find_nnunetv2_trainer_dir()
-    print(f"  Target: {trainer_dir}")
-
-    for fname in ["nnUNetTrainerBaseline.py", "nnUNetTrainerGeometric.py", "geometric_losses.py"]:
-        src = os.path.join(SCRIPT_DIR, fname)
-        if os.path.exists(src):
-            shutil.copy2(src, os.path.join(trainer_dir, fname))
-            print(f"    ✓ {fname}")
-        else:
-            print(f"    ⚠  Non trovato (skip): {fname}")
-
-    # Patch epoche nel trainer baseline (hardcoded nel sorgente, va sovrascritto)
-    _patch_epochs_in_trainer(trainer_dir)
-
-    # Geometric config con pesi e NUM_EPOCHS dell'esperimento corrente
-    _write_geometric_config(trainer_dir)
-    print(f"  ✓ Tutti i trainer installati  (epoche → {EPOCHS})")
+    _separator("STEP 3a: PREPARAZIONE CONFIGURAZIONE TRAINER")
+    _write_geometric_config()
+    print(f"  ✓ Configurazione pronta  (epoche → {EPOCHS})")
 
 
 def run_training_single(net_type):
-    """Lancia nnUNetv2_train per un singolo tipo di rete."""
+    """Lancia il training nnU-Net (run_training_entry) per un singolo tipo di rete."""
     trainer_name = TRAINERS[net_type]
     t0 = time.perf_counter()
     print(f"\n  {'─'*55}")
@@ -845,19 +808,13 @@ def run_training_single(net_type):
     # nnUNet_n_proc_DA=0: disabilita worker multiprocessing per evitare
     # "No space left on device" su /dev/shm (63 MB nei container Docker).
     # NON impostare globalmente: rompe il preprocessing (torch.set_num_threads).
-    #
-    # PYTHONPATH=SCRIPT_DIR: quando nnUNetv2_train gira come entry-point script,
-    # Python imposta sys.path[0]='/venv/bin/' invece di '' (CWD). Senza PYTHONPATH,
-    # 'from geometric_config import ...' non trova geometric_config.py nella CWD
-    # e scatta sempre il fallback hardcoded, ignorando i pesi impostati dall'utente.
-    existing_pp = os.environ.get("PYTHONPATH", "")
-    pythonpath = f"{SCRIPT_DIR}:{existing_pp}" if existing_pp else SCRIPT_DIR
     device = _resolve_device()
     print(f"  Device     : {device}")
-    _run_subprocess(
-        ["nnUNetv2_train", str(DATASET_ID), "2d", "0", "-tr", trainer_name, "-device", device],
+    _run_nnunet_entry(
+        "nnunetv2.run.run_training", "run_training_entry",
+        [str(DATASET_ID), "2d", "0", "-tr", trainer_name, "-device", device],
         f"Training {net_type}",
-        extra_env={"nnUNet_n_proc_DA": "0", "PYTHONPATH": pythonpath},
+        extra_env={"nnUNet_n_proc_DA": "0"},
     )
     elapsed = time.perf_counter() - t0
     print(f"  ✓ Training {net_type} completato ({_format_duration(elapsed)})")
@@ -1132,18 +1089,21 @@ def run_inference_single(net_type):
     with tempfile.TemporaryDirectory(prefix="nnunet_inf_") as tmp_input:
         _convert_test_to_nifti(tmp_input)
         device = _resolve_device()
-        _run_subprocess([
-            "nnUNetv2_predict",
-            "-i", tmp_input,
-            "-o", nifti_out_dir,
-            "-d", str(DATASET_ID),
-            "-c", "2d",
-            "-f", "0",
-            "-tr", trainer_name,
-            "-device", device,
-            "--disable_tta",
-        ], f"Inferenza {net_type}",
-        extra_env={"nnUNet_n_proc_DA": "0"})
+        _run_nnunet_entry(
+            "nnunetv2.inference.predict_from_raw_data", "predict_entry_point",
+            [
+                "-i", tmp_input,
+                "-o", nifti_out_dir,
+                "-d", str(DATASET_ID),
+                "-c", "2d",
+                "-f", "0",
+                "-tr", trainer_name,
+                "-device", device,
+                "--disable_tta",
+            ],
+            f"Inferenza {net_type}",
+            extra_env={"nnUNet_n_proc_DA": "0"},
+        )
 
     _nifti_preds_to_png(nifti_out_dir, png_out_dir, min_component_px=MIN_COMPONENT_PX)
     print(f"  ✓ Maschere salvate in: {png_out_dir}")
@@ -1356,7 +1316,7 @@ def main():
     run_preprocessing()
 
     # ── STEP 3: Training ───────────────────────────────────────────────────
-    install_trainer_files()
+    prepare_trainer_environment()
     training_times = run_all_training()
     if "geometrica" in _get_nets_to_run():
         copy_geometric_verify_log_if_present()
