@@ -11,8 +11,15 @@ geometrica/experiments/*/1_dataset/
 geometrica/experiments/*/2_nnunet_engine/
 # Predizioni PNG
 geometrica/experiments/*/3_predizioni/
+# Predizioni esterne (test.py modalità external)
+geometrica/experiments/*/3_predizioni_ext/
 # Visualizzazioni per-immagine (centinaia di PNG, troppo pesanti)
 geometrica/experiments/*/4_confronto_finale/visualizations/
+# Output estesi analisi esterna (contiene molte immagini)
+geometrica/experiments/*/4_analisi_ext_*/
+# In 4_confronto_finale ignora tutto, tranne il chart riepilogativo per test
+geometrica/experiments/*/4_confronto_finale/*
+!geometrica/experiments/*/4_confronto_finale/metrics_comparison_chart.png
 # Log di esecuzione
 geometrica/experiments/*/logs/
 
