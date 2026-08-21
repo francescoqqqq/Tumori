@@ -1,124 +1,120 @@
-# Analisi Critica delle Metriche
+# Metriche di Valutazione — Come Funzionano Oggi
 
-## 🔍 Problemi Identificati
+Documento di riferimento su come sono implementate **attualmente** le metriche
+di valutazione in [`metrics_utils.py`](../metrics_utils.py), usate da
+`run_experiment.py` (Step 5) e da `test.py` per confrontare le predizioni
+delle reti (baseline e geometrica) contro il ground truth. Tutte le funzioni
+operano su maschere già binarizzate a soglia 0.5.
 
-### 1. **DISALLINEAMENTO TRA LOSS E VALUTAZIONE**
+Per la loss usata in training vedi invece [`LOSS_GEOMETRIC.md`](LOSS_GEOMETRIC.md).
 
-#### Compactness
-- **Loss (training)**: Usa perimetro **soft** (gradiente Sobel su probabilità)
-- **Valutazione (test)**: Usa perimetro **discreto** (cv2.arcLength su contorni binari)
-- **Problema**: La rete ottimizza per un perimetro soft, ma viene valutata su un perimetro discreto. Questi possono divergere significativamente.
+---
 
-#### Eccentricity
-- **Loss (training)**: Calcola `(1 - lambda_min/lambda_max)²` (approssimazione di eccentricity²)
-- **Valutazione (test)**: Calcola `sqrt(1 - (minor_axis/major_axis)²)` (eccentricity vera)
-- **Problema**: La loss ottimizza una metrica diversa da quella valutata. La loss penalizza `(1-ratio)²`, mentre la valutazione misura `sqrt(1-ratio²)`. Queste non sono equivalenti!
+## Indice
 
-**Esempio numerico:**
-- ratio = 0.8 (ellisse moderata)
-- Loss: `(1-0.8)² = 0.04`
-- Eccentricity vera: `sqrt(1-0.8²) = sqrt(0.36) = 0.6`
-- La loss è molto più piccola della eccentricity vera!
+1. [Dice Score](#dice-score)
+2. [IoU](#iou)
+3. [Compactness](#compactness)
+4. [Eccentricity](#eccentricity)
+5. [Hausdorff Distance](#hausdorff-distance)
+6. [Boundary IoU](#boundary-iou)
+7. [Aggregazione su più immagini](#aggregazione-su-più-immagini)
+8. [Visualizzazioni e vis_bad](#visualizzazioni-e-vis_bad)
 
-#### Solidity
-- **Loss (training)**: NON esiste! Solidity non è ottimizzata direttamente.
-- **Valutazione (test)**: Viene calcolata e usata per confronti
-- **Problema**: La rete non ha mai visto solidity durante il training, quindi non può ottimizzarla.
+---
 
-### 2. **PROBLEMI SPECIFICI NELLE IMPLEMENTAZIONI**
+## Dice Score
 
-#### Compactness - Clamp a 1.0
 ```python
-compactness_values.append(min(compactness, 1.0))  # Cap a 1.0
+pred_b = (pred > 0.5).astype(np.float32)
+gt_b   = (gt   > 0.5).astype(np.float32)
+dice = 2 * |pred_b ∩ gt_b| / (|pred_b| + |gt_b|)
 ```
-**Problema**: Un cerchio perfetto ha compactness = 1.0, ma forme più compatte (es. esagono regolare) possono avere compactness > 1.0. Il clamp maschera questo.
 
-**Soluzione**: Rimuovere il clamp o documentare perché è necessario.
+Calcolato a livello di pixel su tutta l'immagine: se ci sono più cerchi,
+contribuiscono tutti insieme alla stessa cifra. Se sia predizione che GT sono
+vuoti, ritorna `1.0` (nessun errore); se solo uno dei due è vuoto, `0.0`.
 
-#### Hausdorff Distance - Solo contorno più grande
+## IoU
+
 ```python
-pred_contour = max(pred_contours, key=len)
-gt_contour = max(gt_contours, key=len)
+iou = |pred_b ∩ gt_b| / |pred_b ∪ gt_b|
 ```
-**Problema**: Con dataset multi-cerchi (Dataset 501), ci sono più cerchi. Usare solo il più grande perde informazioni sugli altri cerchi.
 
-**Soluzione**: Calcolare Hausdorff per ogni coppia di contorni e fare media/min/max.
+Stessa logica del Dice (pixel-level, tutta l'immagine, stessa gestione dei
+casi vuoti).
 
-#### Threshold fisso 0.5
-Tutte le metriche di valutazione usano:
-```python
-pred_binary = (pred > 0.5).astype(np.float32)
-```
-**Problema**: La loss opera su probabilità soft, ma la valutazione binarizza a 0.5. Potrebbe essere meglio usare un threshold ottimale per ogni immagine (es. Otsu) o valutare anche con probabilità soft.
+## Compactness
 
-### 3. **INCONSISTENZE NELLA GESTIONE MULTI-CERCHI**
+$$
+C = \min\!\left(\frac{4\pi \cdot \text{Area}}{\text{Perimetro}^2},\; 1.0\right)
+$$
 
-- **Loss**: Opera su tutto il batch, calcola metriche aggregate
-- **Valutazione**: Trova contorni separati, fa media delle metriche per contorno
+- Si binarizza la maschera (`> 0.5`), si estraggono i contorni con
+  `cv2.findContours` (`RETR_EXTERNAL`, `CHAIN_APPROX_SIMPLE`).
+- Si seleziona il **contorno di area massima** (`max(contours, key=cv2.contourArea)`).
+- Area e perimetro (`cv2.contourArea`, `cv2.arcLength`) sono calcolati su
+  quel singolo contorno.
+- Il risultato è clampato a un massimo di `1.0` (un cerchio perfetto vale 1.0;
+  il clamp mantiene la scala interpretabile in `[0,1]`).
+- Ritorna `nan` se non ci sono contorni, o se l'area è ≤ 10 px, o se il
+  perimetro è zero.
 
-**Problema**: Con più cerchi, la media può mascherare problemi su singoli cerchi.
+## Eccentricity
 
-**Esempio**: 
-- 4 cerchi perfetti + 1 cerchio molto irregolare
-- Media compactness potrebbe essere ancora alta, ma un cerchio è pessimo
+$$
+e = \sqrt{1 - (b/a)^2}, \qquad a \ge b \text{ semiassi dell'ellisse fittata}
+$$
 
-**Soluzione**: Reportare anche min/max/std per contorno, non solo media.
+- Stessa binarizzazione e stessa selezione del contorno di area massima
+  usata da Compactness.
+- L'ellisse viene fittata sul contorno con `cv2.fitEllipse` (richiede almeno
+  5 punti sul contorno e area ≥ 10 px, altrimenti ritorna `nan`).
+- `0.0` = cerchio perfetto, valori vicino a `1.0` = forma molto allungata.
 
-## ✅ Raccomandazioni
+## Hausdorff Distance
 
-### Priorità Alta
+$$
+H(P,G) = \max\big(\,\sup_{p\in P}\inf_{g\in G}\|p-g\|,\ \sup_{g\in G}\inf_{p\in P}\|g-p\|\,\big)
+$$
 
-1. **Allineare eccentricity loss con valutazione**
-   - Opzione A: Cambiare loss per usare eccentricity vera: `sqrt(1 - (lambda_min/lambda_max)²)`
-   - Opzione B: Cambiare valutazione per usare `(1 - ratio)²` (ma meno interpretabile)
+- Contorni estratti con `CHAIN_APPROX_NONE` (tutti i punti, non semplificati)
+  sia per predizione che per GT.
+- Da ciascun set di contorni si prende quello di **area massima**
+  (`cv2.contourArea`), non quello con più punti.
+- Distanza calcolata con `scipy.spatial.distance.directed_hausdorff` in
+  entrambe le direzioni, si tiene il massimo.
+- Se predizione o GT sono completamente vuoti, ritorna la diagonale
+  dell'immagine (caso peggiore convenzionale), invece di `nan`.
+- La media di questa metrica su un dataset è sensibile a outlier estremi:
+  per confronti aggregati è preferibile guardare la mediana oltre alla media.
 
-2. **Aggiungere solidity alla loss**
-   - Implementare `_vectorized_solidity_loss()` usando approssimazione differenziabile del convex hull
-   - O rimuovere solidity dalle metriche di valutazione se non è importante
+## Boundary IoU
 
-3. **Migliorare Hausdorff per multi-cerchi**
-   - Calcolare per ogni coppia pred-GT
-   - Reportare media, min, max, std
+- Bordo estratto per sottrazione morfologica: `maschera - erosione(maschera)`,
+  con kernel quadrato di lato `thickness` (default 3 px).
+- IoU calcolato solo tra i pixel di bordo di predizione e GT.
+- Stessa gestione dei casi vuoti di Dice/IoU.
 
-### Priorità Media
+## Aggregazione su più immagini
 
-4. **Documentare differenze loss vs valutazione**
-   - Aggiungere commenti che spiegano perché loss usa approssimazioni soft
-   - Documentare che le metriche di valutazione sono "proxy" delle loss
+`_aggregate_for_vis_bad()` (usata anche da `run_experiment.py`/`test.py` con
+funzioni equivalenti) calcola, per ciascuna metrica, su tutte le immagini del
+test set:
 
-5. **Rimuovere clamp su compactness**
-   - Permettere valori > 1.0 per forme più compatte del cerchio
-   - O documentare perché il clamp è necessario
+- media, mediana, 95° percentile, deviazione standard, min, max, e numero di
+  campioni validi (`_n`).
+- I valori `nan` (predizioni vuote per compactness/eccentricity) vengono
+  esclusi dal calcolo di questi aggregati, non trattati come zero.
 
-6. **Aggiungere metriche per contorno**
-   - Reportare min/max/std per ogni metrica geometrica
-   - Identificare "worst case" cerchi
+## Visualizzazioni e vis_bad
 
-### Priorità Bassa
-
-7. **Valutazione con threshold ottimale**
-   - Implementare Otsu threshold per ogni immagine
-   - Confrontare metriche con threshold fisso vs ottimale
-
-8. **Valutazione soft (senza binarizzazione)**
-   - Implementare versioni "soft" delle metriche che usano probabilità invece di binario
-
-## 📊 Impatto Stimato
-
-| Problema | Impatto | Difficoltà Fix |
-|----------|---------|----------------|
-| Eccentricity mismatch | 🔴 ALTO | Media |
-| Solidity non ottimizzata | 🟡 MEDIO | Alta |
-| Compactness soft vs discreto | 🟡 MEDIO | Bassa (solo documentazione) |
-| Hausdorff multi-cerchi | 🟢 BASSO | Media |
-| Threshold fisso | 🟢 BASSO | Bassa |
-
-## 🎯 Conclusione
-
-Le metriche sono **ben implementate** per la valutazione, ma c'è un **disallineamento critico** tra cosa la rete ottimizza (loss) e come viene valutata. Questo può portare a:
-
-1. **Risultati deludenti**: La rete ottimizza metriche diverse da quelle valutate
-2. **Confusione nell'interpretazione**: Perché la loss scende ma le metriche non migliorano?
-3. **Ottimizzazione sub-ottimale**: La rete potrebbe non ottimizzare le metriche che realmente interessano
-
-**Raccomandazione principale**: Allineare la loss di eccentricity con la valutazione, o viceversa. Questo è il problema più critico.
+- `create_visualization()` / `create_comparison_visualization()`: pannelli
+  immagine originale / GT / predizione / overlay TP-FN-FP, con le metriche
+  principali scritte in overlay.
+- `create_metrics_comparison_chart()`: grafico a barre baseline vs geometrica
+  su Dice, IoU, Compactness, Eccentricity, Boundary IoU, Hausdorff (95°
+  percentile), con colorazione verde/rosso per la rete migliore su ciascuna
+  metrica.
+- `create_vis_bad()`: isola le N predizioni con Dice più basso (default 10)
+  per rete, per ispezione visiva mirata dei casi peggiori.
