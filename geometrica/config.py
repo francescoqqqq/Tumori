@@ -2,16 +2,19 @@
 #  config.py  –  Parametri esperimento  
 # ==============================================================================
 
-FOLDER_NAME      = "test_40_6"   # Nome sottocartella dentro experiments/
+FOLDER_NAME      = "test_40_4_pesi"   # Nome sottocartella dentro experiments/
 AUTOMATIC        = "si"          # "si" = pipeline automatica  |  "no" = conferma interattiva step-by-step
+# Riuso dataset: "no" = genera dataset nuovo (default storico)
+# altrimenti usa il dataset già presente in experiments/<nome>/1_dataset
+REUSE_DATASET_FROM = "test_40_4_conferma"
 
 # --- Dataset ---
 IMG_SIZE         = 512           # Lato immagine quadrata (px)
-NUM_IMAGES       = 50           # Totale immagini generate
+NUM_IMAGES       = 400           # Totale immagini generate
 SPLIT_TEST_SIZE  = 0.80          # Frazione test set  (0.2 → 20 %)
 TARGET_MODE      = 1             # 1 = single-circle  |  2 = multi-circle
 CIRCLE_ALONE     = "no"          # "si" = distrattori non sovrapposti ai cerchi (solo style=identico)
-COLOR_STYLE      = "uguale"
+COLOR_STYLE      = "identico"
 # COLOR_STYLE:
 #   "differente" → cerchi sfumati (gradiente), visivamente distinti dai distrattori piatti
 #   "uguale"     → cerchi piatti stesso range colori [180,240] dei distrattori → no shortcut
@@ -20,9 +23,9 @@ COLOR_STYLE      = "uguale"
 # --- nnU-Net e Training ---
 DATASET_ID       = 501           # ID numerico dataset (DatasetXXX_Shapes)
 RETI_DA_ALLENARE = "entrambe"   # "baseline" | "geometrica" | "entrambe"
-EPOCHS           = 6
+EPOCHS           = 100
 BATCH_SIZE       = 8             # batch size per GPU
-WARMUP_EPOCHS    = 2            # Epoche warm-up prima di attivare loss geometrica
+WARMUP_EPOCHS    = 20            # Epoche warm-up prima di attivare loss geometrica
 
 # Device di training/inference: "auto" rileva automaticamente cuda/mps/cpu
 # (usa GPU se disponibile, altrimenti CPU) → nessuna modifica manuale serve
@@ -31,9 +34,9 @@ WARMUP_EPOCHS    = 2            # Epoche warm-up prima di attivare loss geometri
 DEVICE           = "auto"
 
 # Pesi loss geometrica (solo per rete geometrica)
-WEIGHT_COMPACTNESS      = 0.03
-WEIGHT_ECCENTRICITY     = 0.05
-WEIGHT_BOUNDARY         = 0.01
+WEIGHT_COMPACTNESS      = 0.015
+WEIGHT_ECCENTRICITY     = 0.025
+WEIGHT_BOUNDARY         = 0.006
 GEOMETRIC_LOSS_SAMPLES  = 4      # Campioni del batch su cui calcolare la loss geometrica
 # per motivi di tempi di allenamento conviene lasciarlo a 4
 

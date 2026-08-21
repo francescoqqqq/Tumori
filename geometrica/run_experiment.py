@@ -74,10 +74,19 @@ CONFRONTO_DIR = os.path.join(EXP_DIR, "4_confronto_finale")
 
 DATASET_NAME = f"Dataset{DATASET_ID:03d}_Shapes"
 
+# Modalita' opzionale: riuso di un dataset gia' esistente.
+# Se REUSE_DATASET_FROM='no' la pipeline mantiene il comportamento storico.
+REUSE_DATASET_FROM = globals().get("REUSE_DATASET_FROM", "no")
+
 TRAINERS = {
     "baseline":   "nnUNetTrainerBaseline",
     "geometrica": "nnUNetTrainerGeometric",
 }
+
+# Path dataset effettivamente usati da conversione, inference e confronto.
+# Di default puntano al dataset locale dell'esperimento corrente.
+ACTIVE_TRAIN_DIR = TRAIN_DIR
+ACTIVE_TEST_DIR = TEST_DIR
 
 # ==============================================================================
 #  VARIABILI D'AMBIENTE nnU-Net  –  DEVONO STARE QUI, PRIMA DI import nnunetv2
@@ -380,6 +389,7 @@ def _recalc_paths():
     global EXP_DIR, DATASET_DIR, TRAIN_DIR, TEST_DIR
     global NNUNET_ENGINE_DIR, NNUNET_RAW_DIR, NNUNET_PREPROCESSED_DIR, NNUNET_RESULTS_DIR
     global PRED_DIR, CONFRONTO_DIR, DATASET_NAME
+    global ACTIVE_TRAIN_DIR, ACTIVE_TEST_DIR
 
     EXP_DIR     = os.path.join(SCRIPT_DIR, "experiments", FOLDER_NAME)
     DATASET_DIR = os.path.join(EXP_DIR, "1_dataset")
@@ -394,6 +404,10 @@ def _recalc_paths():
     PRED_DIR      = os.path.join(EXP_DIR, "3_predizioni")
     CONFRONTO_DIR = os.path.join(EXP_DIR, "4_confronto_finale")
     DATASET_NAME  = f"Dataset{DATASET_ID:03d}_Shapes"
+
+    # Reset dei path attivi al dataset locale quando ricalcoliamo i percorsi.
+    ACTIVE_TRAIN_DIR = TRAIN_DIR
+    ACTIVE_TEST_DIR = TEST_DIR
 
     os.environ['nnUNet_raw']          = NNUNET_RAW_DIR
     os.environ['nnUNet_preprocessed'] = NNUNET_PREPROCESSED_DIR
@@ -624,7 +638,71 @@ def cleanup_raw(raw_dir):
     print(f"\n  Cartella temporanea rimossa: {os.path.basename(raw_dir)}/")
 
 
-def save_config_yaml(n_train, n_test):
+def configure_dataset_source(n_train=None, n_test=None):
+    """
+    Imposta i path dataset attivi.
+
+    - REUSE_DATASET_FROM='no': usa il dataset locale (comportamento storico)
+    - REUSE_DATASET_FROM='<exp>': usa experiments/<exp>/1_dataset già esistente
+
+    Ritorna (n_train, n_test, source_info) dove source_info è None in modalità
+    standard, altrimenti contiene i riferimenti al dataset sorgente.
+    """
+    global ACTIVE_TRAIN_DIR, ACTIVE_TEST_DIR
+
+    if str(REUSE_DATASET_FROM).strip().lower() == "no":
+        ACTIVE_TRAIN_DIR = TRAIN_DIR
+        ACTIVE_TEST_DIR = TEST_DIR
+        return n_train, n_test, None
+
+    source_name = str(REUSE_DATASET_FROM).strip()
+    source_base = os.path.join(SCRIPT_DIR, "experiments", source_name, "1_dataset")
+    source_train = os.path.join(source_base, "train")
+    source_test = os.path.join(source_base, "test")
+
+    src_train_images = os.path.join(source_train, "images")
+    src_train_labels = os.path.join(source_train, "labels")
+    src_test_images = os.path.join(source_test, "images")
+    src_test_labels = os.path.join(source_test, "labels")
+
+    required_dirs = [src_train_images, src_train_labels, src_test_images, src_test_labels]
+    missing = [d for d in required_dirs if not os.path.isdir(d)]
+    if missing:
+        raise FileNotFoundError(
+            "REUSE_DATASET_FROM impostato ma dataset sorgente incompleto. "
+            f"Cartelle mancanti: {missing}"
+        )
+
+    ACTIVE_TRAIN_DIR = source_train
+    ACTIVE_TEST_DIR = source_test
+
+    n_train_resolved = len([f for f in os.listdir(src_train_images) if f.lower().endswith(".png")])
+    n_test_resolved = len([f for f in os.listdir(src_test_images) if f.lower().endswith(".png")])
+
+    source_info = {
+        "name": source_name,
+        "path": source_base,
+    }
+
+    trace_path = os.path.join(DATASET_DIR, "dataset_source.txt")
+    with open(trace_path, "w", encoding="utf-8") as fh:
+        fh.write("Dataset source for this experiment\n")
+        fh.write("=" * 60 + "\n")
+        fh.write(f"Generated: {datetime.now().isoformat(timespec='seconds')}\n")
+        fh.write("mode: reuse\n")
+        fh.write(f"source_experiment: {source_name}\n")
+        fh.write(f"source_1_dataset: {source_base}\n")
+        fh.write(f"source_train: {source_train}\n")
+        fh.write(f"source_test: {source_test}\n")
+        fh.write(f"n_train: {n_train_resolved}\n")
+        fh.write(f"n_test: {n_test_resolved}\n")
+
+    print(f"\n  ✓ Dataset riusato da: {source_base}")
+    print(f"  ✓ Traccia sorgente dataset: {trace_path}")
+    return n_train_resolved, n_test_resolved, source_info
+
+
+def save_config_yaml(n_train, n_test, source_info=None):
     """Scrive config_riassunto.yaml nella root dell'esperimento."""
     lines = [
         "# Configurazione esperimento – auto-generato da run_experiment.py",
@@ -633,6 +711,7 @@ def save_config_yaml(n_train, n_test):
         "esperimento:",
         f"  folder_name:      {FOLDER_NAME}",
         f"  cartella:         {EXP_DIR}",
+        f"  reuse_dataset_from: {REUSE_DATASET_FROM}",
         "",
         "dataset:",
         f"  img_size:         {IMG_SIZE}",
@@ -643,6 +722,13 @@ def save_config_yaml(n_train, n_test):
         f"  target_mode:      {TARGET_MODE}   # 1=single  2=multi",
         f"  color_style:      {COLOR_STYLE}",
         f"  circle_alone:     {CIRCLE_ALONE}",
+    ]
+    if source_info is not None:
+        lines.extend([
+            f"  source_experiment: {source_info['name']}",
+            f"  source_dataset_path: {source_info['path']}",
+        ])
+    lines.extend([
         "",
         "training:",
         f"  dataset_id:       {DATASET_ID}",
@@ -660,7 +746,7 @@ def save_config_yaml(n_train, n_test):
         f"  nnUNet_raw:          {NNUNET_RAW_DIR}",
         f"  nnUNet_preprocessed: {NNUNET_PREPROCESSED_DIR}",
         f"  nnUNet_results:      {NNUNET_RESULTS_DIR}",
-    ]
+    ])
     yaml_path = os.path.join(EXP_DIR, "config_riassunto.yaml")
     with open(yaml_path, "w") as fh:
         fh.write("\n".join(lines) + "\n")
@@ -679,8 +765,8 @@ def convert_train_to_nnunet():
     import numpy as np # noqa: PLC0415
     import nibabel as nib  # noqa: PLC0415
 
-    src_images   = os.path.join(TRAIN_DIR, "images")
-    src_labels   = os.path.join(TRAIN_DIR, "labels")
+    src_images   = os.path.join(ACTIVE_TRAIN_DIR, "images")
+    src_labels   = os.path.join(ACTIVE_TRAIN_DIR, "labels")
     dest_dataset = os.path.join(NNUNET_RAW_DIR, DATASET_NAME)
     dest_images  = os.path.join(dest_dataset, "imagesTr")
     dest_labels  = os.path.join(dest_dataset, "labelsTr")
@@ -953,7 +1039,7 @@ def _convert_test_to_nifti(temp_dir):
     import numpy as np # noqa: PLC0415
     import nibabel as nib  # noqa: PLC0415
 
-    src   = os.path.join(TEST_DIR, "images")
+    src   = os.path.join(ACTIVE_TEST_DIR, "images")
     files = sorted(f for f in os.listdir(src) if f.endswith(".png"))
     affine = np.eye(4)
 
@@ -1165,8 +1251,8 @@ def run_comparison():
     viz_dir = os.path.join(CONFRONTO_DIR, "visualizations")
     os.makedirs(viz_dir, exist_ok=True)
 
-    test_img_dir = os.path.join(TEST_DIR, "images")
-    test_lbl_dir = os.path.join(TEST_DIR, "labels")
+    test_img_dir = os.path.join(ACTIVE_TEST_DIR, "images")
+    test_lbl_dir = os.path.join(ACTIVE_TEST_DIR, "labels")
     test_files   = sorted(f for f in os.listdir(test_img_dir) if f.endswith(".png"))
 
     print(f"  Immagini test : {len(test_files)}")
@@ -1300,10 +1386,16 @@ def main():
 
     # ── STEP 1: Dataset ────────────────────────────────────────────────────
     create_experiment_structure()
-    raw_dir = generate_dataset()
-    n_train, n_test = split_and_organize(raw_dir)
-    cleanup_raw(raw_dir)
-    save_config_yaml(n_train, n_test)
+    source_info = None
+    if str(REUSE_DATASET_FROM).strip().lower() == "no":
+        raw_dir = generate_dataset()
+        n_train, n_test = split_and_organize(raw_dir)
+        cleanup_raw(raw_dir)
+        n_train, n_test, source_info = configure_dataset_source(n_train, n_test)
+    else:
+        print(f"\n  STEP 1b: RIUSO DATASET DA experiments/{REUSE_DATASET_FROM}/1_dataset")
+        n_train, n_test, source_info = configure_dataset_source()
+    save_config_yaml(n_train, n_test, source_info=source_info)
 
     # ── Breve riepilogo dataset + conferma training ────────────────────────
     if AUTOMATIC == "no":
