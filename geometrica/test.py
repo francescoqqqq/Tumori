@@ -467,26 +467,26 @@ def _run_analysis_core(folder_name, test_img_dir, test_lbl_dir,
         if header_note:
             f.write(f"  {header_note}\n")
         f.write(f"  nota: compactness/eccentricity escluse quando pred è vuota\n")
-        f.write(f"  nota: hausdorff_distance — p95 usato nel confronto\n")
+        f.write(f"  nota: hausdorff_distance — mediana usata nel confronto (robusta agli outlier)\n")
         for net, agg in aggregate.items():
             f.write(f"\n{'─' * 40}\n{net.upper()}\n{'─' * 40}\n")
             for m in _METRIC_NAMES:
                 mean = agg.get(f"{m}_mean", 0.0)
                 std  = agg.get(f"{m}_std",  0.0)
-                p95  = agg.get(f"{m}_p95",  0.0)
+                median = agg.get(f"{m}_median", 0.0)
                 n    = agg.get(f"{m}_n",    len(test_files))
                 if m in _SHAPE_METRICS:
                     f.write(f"  {m:25s}: {mean:.4f} ± {std:.4f}"
                             f"  (n={n}/{len(test_files)} pred non-vuote)\n")
                 elif m == "hausdorff_distance":
-                    f.write(f"  {m:25s}: {mean:.4f} ± {std:.4f}  [p95: {p95:.4f}]\n")
+                    f.write(f"  {m:25s}: {mean:.4f} ± {std:.4f}  [mediana: {median:.4f}]\n")
                 else:
                     f.write(f"  {m:25s}: {mean:.4f} ± {std:.4f}\n")
         if "baseline" in aggregate and "geometrica" in aggregate:
             f.write(f"\n{'─' * 40}\nMIGLIORAMENTI GEOMETRIC vs BASELINE\n{'─' * 40}\n")
-            f.write(f"  (hausdorff_distance: confronto su p95; altri: su media)\n")
+            f.write(f"  (hausdorff_distance: confronto su mediana; altri: su media)\n")
             for m in _METRIC_NAMES:
-                key = "p95" if m == "hausdorff_distance" else "mean"
+                key = "median" if m == "hausdorff_distance" else "mean"
                 b   = aggregate["baseline"].get(f"{m}_{key}",   0.0)
                 g   = aggregate["geometrica"].get(f"{m}_{key}", 0.0)
                 if m in _LOWER_BETTER:

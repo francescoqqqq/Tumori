@@ -1,0 +1,34 @@
+# Configurazione esperimento – auto-generato da run_experiment.py
+# Data: 2026-08-25T07:46:59
+
+esperimento:
+  folder_name:      test_30
+  cartella:         /workspace/geometrica/experiments/test_30
+  reuse_dataset_from: no
+
+dataset:
+  img_size:         512
+  num_images:       200
+  split_test_size:  0.85
+  n_train:          30
+  n_test:           170
+  target_mode:      1   # 1=single  2=multi
+  color_style:      identico
+  circle_alone:     no
+
+training:
+  dataset_id:       501
+  dataset_name:     Dataset501_Shapes
+  reti_da_allenare: entrambe
+  epochs:           100
+  batch_size:       8
+  warmup_epochs:    15
+  weight_compactness:  0.03
+  weight_eccentricity: 0.05
+  weight_boundary:     0.01
+  min_component_px:    500
+
+nnunet_env:
+  nnUNet_raw:          /workspace/geometrica/experiments/test_30/2_nnunet_engine/nnUNet_raw
+  nnUNet_preprocessed: /workspace/geometrica/experiments/test_30/2_nnunet_engine/nnUNet_preprocessed
+  nnUNet_results:      /workspace/geometrica/experiments/test_30/2_nnunet_engine/nnUNet_results

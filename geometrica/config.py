@@ -2,16 +2,16 @@
 #  config.py  –  Parametri esperimento  
 # ==============================================================================
 
-FOLDER_NAME      = "test_40_4_pesi"   # Nome sottocartella dentro experiments/
+FOLDER_NAME      = "test_30"   # Nome sottocartella dentro experiments/
 AUTOMATIC        = "si"          # "si" = pipeline automatica  |  "no" = conferma interattiva step-by-step
 # Riuso dataset: "no" = genera dataset nuovo (default storico)
 # altrimenti usa il dataset già presente in experiments/<nome>/1_dataset
-REUSE_DATASET_FROM = "test_40_4_conferma"
+REUSE_DATASET_FROM = "no"
 
 # --- Dataset ---
 IMG_SIZE         = 512           # Lato immagine quadrata (px)
-NUM_IMAGES       = 400           # Totale immagini generate
-SPLIT_TEST_SIZE  = 0.80          # Frazione test set  (0.2 → 20 %)
+NUM_IMAGES       = 200           # Totale immagini generate
+SPLIT_TEST_SIZE  = 0.85          # Frazione test set  (0.2 → 20 %)
 TARGET_MODE      = 1             # 1 = single-circle  |  2 = multi-circle
 CIRCLE_ALONE     = "no"          # "si" = distrattori non sovrapposti ai cerchi (solo style=identico)
 COLOR_STYLE      = "identico"
@@ -25,7 +25,7 @@ DATASET_ID       = 501           # ID numerico dataset (DatasetXXX_Shapes)
 RETI_DA_ALLENARE = "entrambe"   # "baseline" | "geometrica" | "entrambe"
 EPOCHS           = 100
 BATCH_SIZE       = 8             # batch size per GPU
-WARMUP_EPOCHS    = 20            # Epoche warm-up prima di attivare loss geometrica
+WARMUP_EPOCHS    = 15            # Epoche warm-up prima di attivare loss geometrica
 
 # Device di training/inference: "auto" rileva automaticamente cuda/mps/cpu
 # (usa GPU se disponibile, altrimenti CPU) → nessuna modifica manuale serve
@@ -34,14 +34,14 @@ WARMUP_EPOCHS    = 20            # Epoche warm-up prima di attivare loss geometr
 DEVICE           = "auto"
 
 # Pesi loss geometrica (solo per rete geometrica)
-WEIGHT_COMPACTNESS      = 0.015
-WEIGHT_ECCENTRICITY     = 0.025
-WEIGHT_BOUNDARY         = 0.006
+WEIGHT_COMPACTNESS      = 0.03
+WEIGHT_ECCENTRICITY     = 0.05
+WEIGHT_BOUNDARY         = 0.01
 GEOMETRIC_LOSS_SAMPLES  = 4      # Campioni del batch su cui calcolare la loss geometrica
 # per motivi di tempi di allenamento conviene lasciarlo a 4
 
 # Post-processing inference: rimuove componenti connesse più piccole di questa soglia.
 # Converte "blob piccolo e sbagliato" → predizione vuota (più onesta metricamente).
-# 0 = disabilitato  |  valore consigliato: ~0.2% dell'area immagine
+# 0 = disabilitato  |  valore consigliato: ~0.2% dell'area immagined
 # es. per IMG_SIZE=512: 512*512*0.002 ≈ 524 → usa 500
 MIN_COMPONENT_PX        = 500
